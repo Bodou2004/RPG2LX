@@ -146,6 +146,7 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     std::unique_ptr<MapView> map_view;
     std::string map_error;
     std::string reported_session_error;
+    bool failed_session=false;
     if(!direct_project.empty()) {
         if(!model.open_project(direct_project)){std::cerr<<model.message()<<'\n';return 2;}
     } else if (start_first) {
@@ -229,11 +230,11 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                 if (!session->error().empty() && session->error()!=reported_session_error) {
                     std::cerr << session->error() << '\n'; reported_session_error=session->error();
                 }
-                rect(renderer.get(),0,0,640,480,background);
-                rect(renderer.get(),12,120,616,240,panel);
-                text(renderer.get(),"NO SE PUEDE CONTINUAR",28,140,warning,2,36);
-                wrapped(renderer.get(),map_error.empty()?session->error():map_error,28,185,ink,36,5);
-                text(renderer.get(),"B / Esc: volver a la biblioteca",28,335,accent,1,72);
+                // Engine diagnostics belong to the launcher/log, never over the game.
+                failed_session=true;
+                model.act(MenuAction::Back);
+                map_view.reset();
+                draw(renderer.get(),model);
             } else if (!session->message().empty()) {
                 rect(renderer.get(),12,306,616,160,panel);
                 // Message strings remain data; escape codes are not evaluated.
@@ -245,10 +246,6 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                     if(end==std::string::npos) break;
                     begin=end+1;
                 }
-                text(renderer.get(),"A / Enter: continuar",28,445,accent,1,72);
-            } else {
-                rect(renderer.get(),0,0,640,20,background);
-                text(renderer.get(),"NATIVO EXPERIMENTAL | A: hablar | B: biblioteca",8,6,accent,1,78);
             }
         } else {
             map_view.reset();
@@ -273,7 +270,7 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         const Uint32 elapsed = SDL_GetTicks()-frame_started;
         if (elapsed < 16) SDL_Delay(16-elapsed);
     }
-    if ((start_first || !direct_project.empty()) && (!map_error.empty() || (model.session() && !model.session()->error().empty()))) return 2;
+    if ((start_first || !direct_project.empty()) && failed_session) return 2;
     return 0;
 }
 } // namespace rpg2lx

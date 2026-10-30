@@ -189,3 +189,19 @@ Probado contra el original: arranque en Map001 (8,6), movimiento a (9,6), bloque
 Cambios integrados: resolve_mv_project compartido por inspector/biblioteca/sesión; raíz o www, index.html, Game.exe y .rpgproject como referencias de ruta, sin ejecutar el EXE ni modificar el juego. Detección MZ explícita y versión declarada por rpg_core. Comando run permite ruta externa; RPG2LX.cmd permite arrastrar la carpeta. Plugins activos no ejecutados quedan en el registro, incluidos Community_Basic y CustomLogo de Project1.
 
 Regresiones Debug y Release: CTest 8/8 grupos pasados; nuevos casos cubren export www, entrada Game.exe no ejecutada, identidad MV/MZ, apertura directa y hashes del árbol fuente inalterados. Logs en build/export-debug-tests.log y export-release-tests.log. No afirmar ejecución de los scripts originales ni compatibilidad completa; siguiente trabajo principal debe resolver límites reales observados en Project1.
+### C012 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+El usuario prioriza paquete SD/R36S, sin pruebas interactivas PC y sin HUD añadido al juego. Codex retira banda NATIVO EXPERIMENTAL, instrucciones flotantes y diagnósticos sobre la partida; errores solo log/retorno a biblioteca. Prepara crossbuild ARM64 Linux, enlace dinámico con SDL2 provista por firmware y paquete PortMaster con Project1 local. Firmware solicitado al usuario para fijar compatibilidad. Pruebas automatizadas host serán comprobaciones de desarrollo, no una solicitud al usuario para jugar en PC. No escribir en SD ni formatear unidades sin indicación explícita.
+### C013 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Entrega SD preparada por Codex: dist/RPG2LX-PortMaster-aarch64-Project1.zip, 401063662 bytes. ZIP raíz RPG2LX.sh + rpg2lx/, incluye copia intacta local de Project1 (1102 archivos), ejecutable Linux ARM64 y licencias. No se escribió a ninguna tarjeta ni se publicó el archivo. Checksum junto al ZIP y manifiesto por archivo dentro del paquete. Mantener dist/build/games fuera de Git.
+
+El usuario aclara que quiere port estándar para múltiples firmwares, sin acoplamiento a Aurknix. Confirmado: no hay referencias a firmware en src/include; control.txt/get_controls y mods estándar de PortMaster resuelven diferencias. Datos junto al script, sin depender del punto de montaje ni de la SD primaria. Bibliotecas del firmware, no SDL empaquetada.
+
+Crossbuild Zig 0.13.0, Cortex-A35 aarch64-linux-gnu.2.28. Enlace contra SDK Debian SDL2 2.0.14 usado solo como interfaz; resultado ELF64 AArch64, loader /lib/ld-linux-aarch64.so.1, dependencias SDL2/libc/pthread/dl del dispositivo y símbolos GLIBC_2.17. C++ runtime estático; licencias incluidas. Verificador rechaza RPATH/dependencias ajenas. Fuentes SDK fijadas con SHA-256.
+
+Aurknix se consultó solo como referencia de prueba indicada por el usuario (commit e4cc43eb8eb56d94ff4054884554f22bac4d4f0a, SDL2 2.32.10 y glibc 2.40). El paquete y el motor no condicionan ejecución al nombre de esa distribución.
+
+HUD: eliminadas banda NATIVO EXPERIMENTAL e instrucciones flotantes/continuar. Errores se registran y devuelven a biblioteca, nunca se superponen al mapa. Mensajes de eventos del juego se conservan dentro del soporte actual. Prueba de pixeles sin HUD pasó; binario SD no contiene la cadena del HUD retirado.
+
+Validación: CTest de desarrollo 8/8 grupos pasó tras cambio, bash -n, launcher con contrato PortMaster simulado (SD2/rutas con espacios, cleanup, propagación de estado y rechazo armhf), verificación ELF, checksums completos del ZIP/permisos LF y 1102 archivos del juego. No hay binarios Windows en el paquete. Prueba física en consola sigue pendiente: no presentar compilación estática como compatibilidad universal comprobada. Instalación documentada en docs/SD_PACKAGE.md y LEEME-SD dentro del paquete.

@@ -20,7 +20,7 @@ rpg2lx/                 (fuentes de empaquetado, no instalación)
 ├── gameinfo.xml        (pendiente)
 ├── RPG2LX.sh
 └── rpg2lx/             (directorio instalado bajo ports/)
-    ├── rpg2lx.aarch64  (pendiente compilación ARM)
+    ├── rpg2lx.aarch64  (compilado, verificado ELF; pendiente prueba física)
     ├── games/
     │   └── Mi juego/data/System.json
     ├── saves/<carpeta-del-juego>/
@@ -53,6 +53,6 @@ No se establece reqs=opengl: el generador oficial define ese requisito como Open
 
 ## Límites de validación
 
-El menú se compila y prueba en Windows x86_64; script comprobado con bash -n. Esto no prueba control.txt, pm_finish, hardware, ABI ARM ni disponibilidad de SDL2 en el dispositivo. Faltan build aarch64 con sysroot compatible y prueba R36S/firmware; no hay paquete publicado o listo para el catálogo.
+El binario aarch64 ya se compiló con Zig y un SDK Linux SDL2, y se verificaron ELF y dependencias. El launcher pasó bash -n y pruebas con contrato PortMaster simulado. Se preparó un ZIP local para SD, descrito en SD_PACKAGE.md. Sigue pendiente la ejecución física en consola; no hay publicación en catálogo ni promesa de todas las versiones de firmware verificadas.
 
 Para compilar el menú incluir `-DRPG2LX_WITH_SDL=ON` y SDL2 del target. Las bibliotecas Windows del entorno de desarrollo no deben copiarse al paquete Linux.

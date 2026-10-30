@@ -29,8 +29,12 @@ Windows x86_64 con Zig 0.13.0 / Clang 18.1.6, CMake 4.4.4 y Ninja 1.13.2 prepara
 
 ## Pendiente
 
-Hay renderer de mapas, movimiento e intérprete inicial de eventos. Faltan audio, VM/plugins JavaScript, batalla, menús internos, guardado y muchos comandos MV. Se verificó carga/render/movimiento/colisión en Project1 real y las regresiones internas; no se certificó un juego completo ni sus plugins. Sin build ARM ni prueba R36S. Las fixtures son datos de prueba propios, no juegos completos.
+Hay renderer de mapas, movimiento e intérprete inicial de eventos. Faltan audio, VM/plugins JavaScript, batalla, menús internos, guardado y muchos comandos MV. Se verificó carga/render/movimiento/colisión en Project1 real y las regresiones internas; no se certificó un juego completo ni sus plugins. Build ARM64 completada y verificada como ELF Linux; prueba física R36S pendiente. Las fixtures son datos de prueba propios, no juegos completos.
 
 Próximo trabajo principal de Codex: extender eventos (variables, condiciones, elecciones y eventos comunes), persistencia y audio; seguir validando contra Project1 del usuario, especialmente escenas y plugins originales. Luego preparar y medir build ARM. Antigravity continúa con empaquetado y tareas auxiliares según encargo.
 
 Validación externa Project1: carga directa con run, render del mapa original y movimiento/colisión nativa comprobados. Snapshot de 1102 archivos originales sin cambios; copia local en games/Project1 excluida de Git. Tests de run comprueban que el árbol de archivos fuente permanece intacto.
+
+## Entrega SD/PortMaster
+
+Paquete local dist/RPG2LX-PortMaster-aarch64-Project1.zip, con launcher y Project1 completo. Núcleo independiente del firmware; PortMaster resuelve controles/plataforma. ELF AArch64 con SDL2 dinámica y símbolos GLIBC_2.17; sin SDK o bibliotecas Windows en la entrega. Integridad ZIP y manifiesto de archivos comprobados. La banda e instrucciones de RPG2LX se retiraron del mapa; los errores se escriben al registro y vuelven a biblioteca. Ver SD_PACKAGE.md para instalación y alcance. El paquete está preparado para prueba, no validado físicamente en consola.

@@ -6,35 +6,40 @@
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
 # 1. Detect PortMaster control folder across supported custom firmwares (CFWs)
-if [ -d "/opt/system/Tools/PortMaster/" ]; then
-    controlfolder="/opt/system/Tools/PortMaster"
-elif [ -d "/opt/tools/PortMaster/" ]; then
-    controlfolder="/opt/tools/PortMaster"
-elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
-    controlfolder="$XDG_DATA_HOME/PortMaster"
-else
-    controlfolder="/roms/ports/PortMaster"
-fi
+controlfolder=""
+for candidate in "/opt/system/Tools/PortMaster" "/opt/tools/PortMaster" \
+    "$XDG_DATA_HOME/PortMaster" "/storage/.config/PortMaster" \
+    "/roms/ports/PortMaster" "/roms2/ports/PortMaster" \
+    "/roms/tools/PortMaster" "/roms2/tools/PortMaster"; do
+    if [ -f "$candidate/control.txt" ]; then
+        controlfolder="$candidate"
+        break
+    fi
+done
 
 if [ ! -f "$controlfolder/control.txt" ]; then
     echo "ERROR: PortMaster control.txt not found in $controlfolder"
     exit 1
 fi
 
-source "$controlfolder/control.txt"
+source "$controlfolder/control.txt" || exit 1
 
 # 2. Source CFW specific modifications if present
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 
 # 3. Initialize controller environment and device variables
-get_controls
+get_controls || exit 1
 
-GAMEDIR="/$directory/ports/rpg2lx"
+# Locate our data beside this script, independent of SD number and mount path.
+RPG2LX_PORTS_DIR="$(cd -- "$(dirname -- "$0")" && pwd -P)" || exit 1
+GAMEDIR="$RPG2LX_PORTS_DIR/rpg2lx"
 CONFDIR="$GAMEDIR/config"
 
 mkdir -p "$CONFDIR" "$GAMEDIR/games" "$GAMEDIR/saves" "$GAMEDIR/logs" || exit 1
 cd "$GAMEDIR" || exit 1
 trap 'pm_finish' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # 4. Redirect logs with timestamping for debugging support
 exec > >(tee -a "$GAMEDIR/logs/portmaster.log") 2>&1
@@ -45,9 +50,16 @@ echo "CFW: $CFW_NAME | Device: $DEVICE_NAME | Arch: $DEVICE_ARCH"
 export XDG_DATA_HOME="$CONFDIR"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$LD_LIBRARY_PATH"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+if [ -z "${SDL_GAMECONTROLLERCONFIG_FILE:-}" ] && [ -f "$controlfolder/gamecontrollerdb.txt" ]; then
+    export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+fi
 
 # 6. Check binary existence for target architecture
 BIN="./rpg2lx.${DEVICE_ARCH}"
+if [ "${DEVICE_ARCH:-}" != "aarch64" ]; then
+    echo "ERROR: This package contains an aarch64 binary; detected architecture: ${DEVICE_ARCH:-unknown}"
+    exit 1
+fi
 if [ ! -f "$BIN" ]; then
     echo "ERROR: Binary $BIN not found for architecture $DEVICE_ARCH"
     exit 1

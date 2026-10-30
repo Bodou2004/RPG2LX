@@ -48,6 +48,8 @@ class NativeGameSmoke(unittest.TestCase):
         pixels=bmp[struct.unpack_from('<I',bmp,10)[0]:]
         self.assertGreater(pixels.count(bytes((77,112,50))),1000, 'Grass PNG must be rendered')
         self.assertGreater(pixels.count(bytes((188,147,70))),10, 'Player sprite must be rendered')
+        # The old diagnostic HUD covered the entire top band in this color.
+        self.assertNotIn(bytes((34,21,14,255)),pixels[:640*20*4], 'No RPG2LX HUD over gameplay')
 
     def test_second_map_boot(self):
         path=self.project/'data/System.json'
