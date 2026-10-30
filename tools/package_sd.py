@@ -89,7 +89,7 @@ def main():
         if game.name in ('','.','..'):parser.error('Invalid game folder name')
         shutil.copytree(game,runtime/'games'/game.name)
     (runtime/'build-info.json').write_text(json.dumps({
-        'runtime_version':'0.3.0-alpha',
+        'runtime_version':'0.3.1-alpha',
         'platform':'PortMaster Linux aarch64','firmware_specific_code':False,
         'in_game_runtime_hud':False,'tested_on_hardware':False,'elf':report,
         'includes_user_game':bool(game),'game_folder':game.name if game else None

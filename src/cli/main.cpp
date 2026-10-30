@@ -24,7 +24,7 @@ void print_help() {
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.3.0-alpha (Native MV scenes)\n";
+    std::cout << "rpg2lx version 0.3.1-alpha (Native MV scenes)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 

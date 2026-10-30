@@ -1,4 +1,4 @@
-# Compatibilidad MV — RPG2LX 0.3.0-alpha
+# Compatibilidad MV — RPG2LX 0.3.1-alpha
 
 Actualizado 2026-10-30. Motor nativo parcial: no ejecuta los scripts del motor MV ni plugins. Abrir un mapa no certifica un juego completo.
 

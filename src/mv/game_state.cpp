@@ -49,7 +49,10 @@ void GameSession::refresh_party() {
         a.class_id=get(data,"classId").get_int();const auto& klass=at(classes_,a.class_id);a.class_name=get(klass,"name").get_string();
         const auto& equips=get(data,"equips");
         for(std::size_t slot=0;slot<equips.arr_val.size();++slot)a.equips.push_back({slot==0?1:2,equips.arr_val[slot].get_int()});
-        for(const auto& learning:get(klass,"learnings").arr_val)if(get(learning,"level").get_int()<=a.level)a.skills.push_back(get(learning,"skillId").get_int());
+        for(const auto& learning:get(klass,"learnings").arr_val)if(get(learning,"level").get_int()<=a.level) {
+            const int skill=get(learning,"skillId").get_int();
+            if(skill>0&&std::find(a.skills.begin(),a.skills.end(),skill)==a.skills.end())a.skills.push_back(skill);
+        }
         refresh_stats(a);
         a.hp=a.params[0];a.mp=a.params[1];actors_.push_back(std::move(a));
     }

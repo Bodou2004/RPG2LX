@@ -44,7 +44,7 @@ int main(int argc,char** argv) {
         s.navigate(2);s.confirm();require(s.error().empty(),s.error().c_str());
         require(!s.switch_value(5)&&s.switch_value(6)&&s.variable_value(1)==7&&s.gold()==25,"Correct choice branch, variable condition, common event return");
         // Real database-style equipment changes affect stats and survive save/load.
-        write(game/"data/Classes.json",R"([null,{"id":1,"name":"Hero","traits":[{"code":51,"dataId":1,"value":1}],"learnings":[{"level":1,"skillId":1}]}])");
+        write(game/"data/Classes.json",R"([null,{"id":1,"name":"Hero","traits":[{"code":51,"dataId":1,"value":1}],"learnings":[{"level":1,"skillId":1},{"level":1,"skillId":1}]}])");
         write(game/"data/Weapons.json",R"([null,{"id":1,"name":"Sword","etypeId":1,"wtypeId":1,"params":[0,0,5,0,0,0,0,0],"traits":[]}])");
         write(game/"data/Armors.json","[null]");
         write(game/"data/Items.json",R"([null,{"id":1,"name":"Potion","occasion":0,"scope":7,"itypeId":1,"consumable":true,"damage":{"type":0},"effects":[{"code":11,"dataId":0,"value1":0,"value2":40}]}])");

@@ -4,7 +4,7 @@ Runtime portable para proyectos RPG Maker MV, con Linux en consolas de bolsillo 
 
 ## Estado
 
-0.3.0-alpha: biblioteca SDL2 con preview de título, escenas de título/menú, seguidores, objetos/habilidades/equipo básicos, formación, guardado/carga propios y eventos ampliados. Validado con archivos reales de Project1. La compatibilidad sigue siendo parcial: faltan batalla, audio, JavaScript/plugins y numerosos sistemas MV. La versión anterior arrancó en consola según el usuario; esta actualización requiere nueva prueba física.
+0.3.1-alpha: biblioteca SDL2 con preview de título, escenas de título/menú, seguidores, objetos/habilidades/equipo básicos, formación, guardado/carga propios y eventos ampliados. Project1 tiene un recorrido de 95 pasos comprobado con sus eventos y menús reales; ver docs/TEST_PROJECT.md. La compatibilidad sigue siendo parcial: faltan batalla, audio, JavaScript/plugins y numerosos sistemas MV. La versión anterior arrancó en consola según el usuario; esta actualización requiere nueva prueba física.
 La compatibilidad universal es una meta, no una capacidad demostrada.
 
 ## Documentación
@@ -17,10 +17,11 @@ La compatibilidad universal es una meta, no una capacidad demostrada.
 - `docs/LAUNCHER.md`: biblioteca games, menú y controles.
 - `docs/NATIVE_EXPLORATION.md`: archivos MV originales y alcance real del motor nativo.
 - `docs/SD_PACKAGE.md`: paquete ARM64 de PortMaster preparado para copiar a la SD.
+- `docs/TEST_PROJECT.md`: ubicación de las pruebas de Project1 y recorrido automatizado.
 
 ## Uso actual
 
-**Actualización para consola:** `dist/RPG2LX-0.3.0-PortMaster-update.zip` (runtime sin juegos), sobre la instalación inicial que contiene Project1. Es un port ARM64 estándar, sin acoplamiento a un firmware y sin HUD de diagnóstico durante la partida. Los saves propios quedan fuera de los assets y no son intercambiables con .rpgsave.
+**Actualización para consola:** `dist/RPG2LX-0.3.1-PortMaster-update.zip` (runtime sin juegos), sobre la instalación inicial que contiene Project1. Los datos del recorrido se instalan por separado con tools/sync_game_data.py; ya se actualizaron en H:/ports. Es un port ARM64 estándar, sin acoplamiento a un firmware y sin HUD de diagnóstico durante la partida. Los saves propios quedan fuera de los assets y no son intercambiables con .rpgsave.
 
 X inicia el juego desde la biblioteca. En juego, A confirma/interactúa; B/Start abre o cancela el menú, Y corre. Para volver a biblioteca: menú → Salir → Biblioteca RPG2LX.
 

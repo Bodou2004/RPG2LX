@@ -1,4 +1,4 @@
-# Motor nativo y escenas — RPG2LX 0.3.0-alpha
+# Motor nativo y escenas — RPG2LX 0.3.1-alpha
 
 Usa los archivos de un proyecto real sin convertir ni editar sus mapas. Abrir con `run <carpeta>` o desde games/. Una exportación dentro de www/ también sirve. Los datos sintéticos de fixtures/ se usan solamente para regresiones de desarrollo.
 

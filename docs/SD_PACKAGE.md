@@ -2,6 +2,8 @@
 
 Esta entrega usa el contrato estándar de PortMaster. El motor no consulta el firmware ni tiene reglas propias de Aurknix. SDL2, glibc, vídeo y controles los proporciona el dispositivo a través de PortMaster.
 
+Estado vigente: runtime 0.3.1-alpha y Project1 de pruebas instalados en H:/ports. Se actualizaron siete JSON del juego, con respaldo y manifiesto de 1116 entradas verificado. El recorrido de 95 pasos pasó también leyendo el proyecto desde la SD mediante una prueba oculta del motor; la ejecución física de esta versión en consola sigue pendiente. Guía y alcance: TEST_PROJECT.md. Paquete de runtime más reciente: dist/RPG2LX-0.3.1-PortMaster-update.zip; no incluye los datos nuevos del juego, instalados por separado con tools/sync_game_data.py.
+
 ## Instalación
 
 Paquete inicial con Project1: `dist/RPG2LX-PortMaster-aarch64-Project1.zip` (0.2). Actualización del runtime 0.3: `dist/RPG2LX-0.3.0-PortMaster-update.zip`, sin juegos. Extraer la actualización sobre la instalación existente conserva games/ y saves/.
