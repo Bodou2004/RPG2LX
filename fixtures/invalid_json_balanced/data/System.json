@@ -1,0 +1,8 @@
+{
+  "gameTitle": "Balanced Invalid",
+  "startMapId": 1
+  "forgotten_comma": true,
+  "nested": {
+    "key": "val"
+  }
+}

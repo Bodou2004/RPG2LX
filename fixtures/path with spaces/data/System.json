@@ -1,0 +1,8 @@
+{
+  "gameTitle": "Test Adventure",
+  "startMapId": 1,
+  "startX": 10,
+  "startY": 10,
+  "variables": ["", "Gold", "Score"],
+  "switches": ["", "IntroDone", "BossDefeated"]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Test Adventure",
+  "main": "index.html",
+  "js-flags": "--expose-gc",
+  "window": {
+    "title": "Test Adventure",
+    "toolbar": false,
+    "width": 816,
+    "height": 624,
+    "icon": "icon/icon.png"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "gameTitle": "Broken Json Adventure",
+  "startMapId": 1,
+  "unclosed": {
+    "foo": "bar"

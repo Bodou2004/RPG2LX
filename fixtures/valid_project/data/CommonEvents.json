@@ -1,0 +1,4 @@
+[
+  null,
+  {"id": 1, "name": "OpeningCutscene", "trigger": 0, "switchId": 1, "list": [{"code": 101, "indent": 0, "parameters": ["", 0, 0, 2]}]}
+]

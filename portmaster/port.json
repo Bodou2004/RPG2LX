@@ -1,0 +1,32 @@
+{
+  "version": 4,
+  "name": "rpg2lx.zip",
+  "items": [
+    "RPG2LX.sh",
+    "rpg2lx/"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "RPG2LX - RPG Maker MV Runtime",
+    "desc": "Independent lightweight runtime and inspector for RPG Maker MV games.",
+    "inst": "Place your RPG Maker MV project files inside the ports/rpg2lx/gamedata directory.",
+    "genres": [
+      "rpg",
+      "engine"
+    ],
+    "porter": [
+      "PERPLO",
+      "Codex",
+      "Antigravity"
+    ],
+    "image": {},
+    "rtr": false,
+    "runtime": null,
+    "reqs": [
+      "opengl"
+    ],
+    "arch": [
+      "aarch64"
+    ]
+  }
+}

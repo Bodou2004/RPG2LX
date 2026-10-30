@@ -1,0 +1,87 @@
+"""Black-box regression tests of the compiled C++ executable."""
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BINARY = Path(sys.argv.pop(1)).resolve()
+
+
+class NativeCliTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="rpg2lx native tests ")
+        self.addCleanup(self.temp.cleanup)
+        self.game = Path(self.temp.name) / "game with spaces"
+        shutil.copytree(ROOT / "fixtures/valid_project", self.game)
+
+    def run_cli(self, *args):
+        return subprocess.run([str(BINARY), *map(str, args)], capture_output=True,
+                              encoding="utf-8", errors="replace")
+
+    def test_valid_project_and_map(self):
+        self.assertEqual(self.run_cli("inspect", self.game).returncode, 0)
+        result = self.run_cli("inspect-map", self.game / "data/Map001.json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Cells: 1326", result.stdout)
+
+    def test_invalid_json_in_each_required_file(self):
+        for name in ("System", "MapInfos", "Actors", "CommonEvents"):
+            path = self.game / f"data/{name}.json"
+            original = path.read_bytes()
+            with self.subTest(name=name):
+                path.write_text('{"x":01}', encoding="utf-8")
+                self.assertEqual(self.run_cli("inspect", self.game).returncode, 2)
+            path.write_bytes(original)
+
+    def test_unreadable_data_is_not_valid(self):
+        path = self.game / "data/Actors.json"
+        path.unlink()
+        path.mkdir()
+        self.assertEqual(self.run_cli("inspect", self.game).returncode, 2)
+
+    def test_semantic_system_errors(self):
+        path = self.game / "data/System.json"
+        data = json.loads(path.read_text())
+        for bad in (-1, 1.5, "1", 1e30):
+            with self.subTest(startMapId=bad):
+                path.write_text(json.dumps(dict(data, startMapId=bad)))
+                self.assertEqual(self.run_cli("inspect", self.game).returncode, 2)
+
+    def test_unicode_title(self):
+        path = self.game / "data/System.json"
+        data = json.loads(path.read_text())
+        path.write_text(json.dumps(dict(data, gameTitle="Espa\u00f1a \U0001f600")))
+        result = self.run_cli("inspect", self.game)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Espa\u00f1a \U0001f600", result.stdout)
+
+    def test_bad_map_and_arguments(self):
+        path = self.game / "data/Map001.json"
+        data = json.loads(path.read_text())
+        data["data"] = [0]
+        path.write_text(json.dumps(data))
+        self.assertEqual(self.run_cli("inspect-map", path).returncode, 2)
+        self.assertEqual(self.run_cli("inspect", self.game, "extra").returncode, 1)
+        self.assertEqual(self.run_cli("unknown-command").returncode, 1)
+
+    def test_static_plugin_configuration(self):
+        path = self.game / "js/plugins.js"
+        path.write_text('// comment with [brackets]\nvar $plugins = ' + json.dumps([
+            {"name": "Disabled", "status": False, "parameters": {"name": "not a plugin"}},
+            {"name": "Active", "status": True, "parameters": {"value": "[text]"}}
+        ]) + '; // trailing comment\n', encoding="utf-8")
+        result = self.run_cli("inspect", self.game)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Disabled", result.stdout)
+        self.assertIn("Detected Plugins: 2", result.stdout)
+        self.assertNotIn("  - not a plugin", result.stdout)
+        path.write_text('var $plugins = []; runUnknownCode();', encoding="utf-8")
+        self.assertEqual(self.run_cli("inspect", self.game).returncode, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
