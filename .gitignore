@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/dist/
+/games/
+/saves/
+/logs/
+*.log
+*.zip
+*.7z
+.DS_Store
+Thumbs.db
