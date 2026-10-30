@@ -382,3 +382,9 @@ Ruta de 95 pasos pasada otra vez leyendo el proyecto desde H:/ports/rpg2lx/games
 El usuario solicita subir el trabajo a GitHub. Cuenta conectada y credencial Git verificadas: Bodou2004. Repositorio nuevo creado: https://github.com/Bodou2004/RPG2LX, privado por defecto mientras no se indique otra preferencia. Historial revisado: 198 blobs, sin patrones de tokens/claves privadas ni archivos mayores de 100 MiB detectados. No se guarda ninguna credencial en fuentes, remotos ni reportes.
 
 Preparación para publicación: se conservará el historial Git completo y se agregan examples/Project1/data con los siete JSON de la prueba e instrucciones para aplicarlos sobre un proyecto MV propio. No se suben imágenes/audio/fuentes comerciales, el proyecto original completo, partidas, logs, backups ni SDK/compiladores. Release prevista v0.3.1-alpha con paquete PortMaster sin juegos y paquete de datos de prueba, más SHA-256. No presentar como compatibilidad MV completa ni prueba física de 0.3.1.
+
+### C023 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Subida completada a https://github.com/Bodou2004/RPG2LX, privado. origin configurado por HTTPS sin credenciales en la URL y main siguiendo origin/main. Historial íntegro enviado; el commit 782a440 agrega los siete JSON del recorrido en examples/Project1 y sus instrucciones. La carpeta games original y sus recursos continúan excluidos.
+
+Release experimental publicada: https://github.com/Bodou2004/RPG2LX/releases/tag/v0.3.1-alpha. Cuatro adjuntos: actualización PortMaster ARM64 (418266 bytes), datos del recorrido (9160 bytes) y sus dos SHA-256. Los cuatro tamaños y digests SHA-256 devueltos por GitHub coinciden con los archivos locales. Reporte completo ignorado en build/github-publish-report.json. La release identifica expresamente las pruebas ejecutadas y la compatibilidad pendiente, sin afirmar prueba física de 0.3.1 ni incluir recursos comerciales.
