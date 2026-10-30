@@ -18,6 +18,7 @@ La compatibilidad universal es una meta, no una capacidad demostrada.
 - `docs/NATIVE_EXPLORATION.md`: archivos MV originales y alcance real del motor nativo.
 - `docs/SD_PACKAGE.md`: paquete ARM64 de PortMaster preparado para copiar a la SD.
 - `docs/TEST_PROJECT.md`: ubicación de las pruebas de Project1 y recorrido automatizado.
+- [examples/Project1](examples/Project1/): los siete JSON del recorrido, sin recursos comerciales; instrucciones para aplicarlos sobre un proyecto MV propio.
 
 ## Uso actual
 
@@ -42,4 +43,4 @@ rpg2lx run /ruta/al/proyecto/MV --home /ruta/a/rpg2lx
 
 Codex implementa núcleo, arquitectura, escenas, integración y pruebas; Antigravity programó la nueva vista de biblioteca con imágenes de título en paralelo. El intercambio queda en COORDINATION.md.
 
-Repositorio Git local; no se ha creado ni publicado un remoto.
+Repositorio: [Bodou2004/RPG2LX](https://github.com/Bodou2004/RPG2LX). Los paquetes de consola se adjuntan en [Releases](https://github.com/Bodou2004/RPG2LX/releases); el historial Git conserva código, documentación, fixtures propias y datos del recorrido. Juegos completos, recursos comerciales, partidas, registros y herramientas de compilación locales quedan fuera del repositorio.
