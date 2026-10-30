@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # PortMaster Launcher Script for RPG2LX
-# Standard Lifecycle Reference: https://portmaster.games/port-scripting.html
+# Lifecycle reference: https://portmaster.games/packaging.html
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
@@ -30,15 +30,14 @@ source "$controlfolder/control.txt"
 get_controls
 
 GAMEDIR="/$directory/ports/rpg2lx"
-CONFDIR="$GAMEDIR/conf"
-GAMEDATA="$GAMEDIR/gamedata"
+CONFDIR="$GAMEDIR/config"
 
-mkdir -p "$CONFDIR"
-mkdir -p "$GAMEDATA"
+mkdir -p "$CONFDIR" "$GAMEDIR/games" "$GAMEDIR/saves" "$GAMEDIR/logs" || exit 1
 cd "$GAMEDIR" || exit 1
+trap 'pm_finish' EXIT
 
 # 4. Redirect logs with timestamping for debugging support
-> "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
+exec > >(tee -a "$GAMEDIR/logs/portmaster.log") 2>&1
 echo "=== Starting RPG2LX PortMaster Session: $(date) ==="
 echo "CFW: $CFW_NAME | Device: $DEVICE_NAME | Arch: $DEVICE_ARCH"
 
@@ -51,30 +50,19 @@ export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 BIN="./rpg2lx.${DEVICE_ARCH}"
 if [ ! -f "$BIN" ]; then
     echo "ERROR: Binary $BIN not found for architecture $DEVICE_ARCH"
-    pm_finish
     exit 1
 fi
 chmod +x "$BIN"
 
-# 7. Launch gptokeyb with appropriate layout (analog stick fallback)
-GPTOKEYB_CONFIG="./rpg2lx.gptk"
-if [ -f "./rpg2lx.gptk.$ANALOGSTICKS" ]; then
-    GPTOKEYB_CONFIG="./rpg2lx.gptk.$ANALOGSTICKS"
-fi
-
-if [ -n "$GPTOKEYB" ] && [ -f "$GPTOKEYB_CONFIG" ]; then
-    $GPTOKEYB "rpg2lx.${DEVICE_ARCH}" -c "$GPTOKEYB_CONFIG" &
-fi
+# 7. The menu reads SDL GameController directly; do not duplicate input with gptokeyb.
 
 # 8. Platform helper hook
 pm_platform_helper "$GAMEDIR/rpg2lx.${DEVICE_ARCH}"
 
-# 9. Launch target binary
-# Note: In Phase 0/1 milestone, operates in inspect mode.
-# In Phase 2+ with renderer/event loop ready, this transitions to the game loop:
-# $BIN run "$GAMEDATA"
-$BIN inspect "$GAMEDATA"
+# 9. Open the multi-game library. The binary creates its own app directories.
+"$BIN" launcher --home "$GAMEDIR"
+RPG2LX_STATUS=$?
 
 # 10. Clean up background tasks and restore terminal state
-pm_finish
 echo "=== RPG2LX Session Ended: $(date) ==="
+exit "$RPG2LX_STATUS"

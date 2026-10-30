@@ -1,8 +1,15 @@
 #include "rpg2lx/core.hpp"
 #include "rpg2lx/map.hpp"
+#include "rpg2lx/launcher.hpp"
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 void print_help() {
     std::cout << "rpg2lx - RPG Maker MV Runtime & Inspector for Linux PortMaster\n";
@@ -11,6 +18,8 @@ void print_help() {
     std::cout << "  rpg2lx --version               Show version information\n";
     std::cout << "  rpg2lx inspect <project_path>  Inspect RPG Maker MV project structure\n";
     std::cout << "  rpg2lx inspect-map <map.json>  Validate map layers and event data\n";
+    std::cout << "  rpg2lx launcher [--home DIR]  Open the game library (default command)\n";
+    std::cout << "  rpg2lx list [--home DIR]      List folders detected in games/\n";
 }
 
 void print_version() {
@@ -18,13 +27,56 @@ void print_version() {
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        print_help();
-        return 1;
-    }
+static int rpg2lx_main(int argc, char* argv[]) {
+    std::string command = argc < 2 ? "launcher" : argv[1];
 
-    std::string command = argv[1];
+    if (command == "launcher" || command == "list") {
+        try {
+            auto home = rpg2lx::executable_directory(argv[0]);
+            int smoke_frames = 0;
+            std::string screenshot;
+            for (int i = 2; i < argc; ++i) {
+                const std::string arg = argv[i];
+                if (arg == "--home" && i+1 < argc) home = std::filesystem::u8path(argv[++i]);
+                else if (command == "launcher" && arg == "--smoke-frames" && i+1 < argc) {
+                    const std::string number = argv[++i];
+                    if (number.empty() || number.find_first_not_of("0123456789") != std::string::npos)
+                        throw std::runtime_error("--smoke-frames expects an integer between 1 and 60");
+                    smoke_frames = std::stoi(number);
+                    if (smoke_frames < 1 || smoke_frames > 60) throw std::runtime_error("Invalid smoke frame count");
+                } else if (command == "launcher" && arg == "--screenshot" && i+1 < argc) screenshot = argv[++i];
+                else { std::cerr << "Invalid or incomplete launcher option: " << arg << '\n'; return 1; }
+            }
+            if (!screenshot.empty() && smoke_frames == 0) {
+                std::cerr << "--screenshot requires --smoke-frames\n"; return 1;
+            }
+            rpg2lx::GameLibrary library(home);
+            std::string error;
+            if (!library.initialize(error)) { std::cerr << error << '\n'; return 2; }
+            if (command == "list") {
+                std::vector<std::string> errors;
+                const auto games = library.scan(errors);
+                std::cout << "RPG2LX games: " << games.size() << "\nFolder: " << library.games_path().u8string() << '\n';
+                for (const auto& game : games)
+                    std::cout << (game.detected ? "[MV] " : "[INCOMPLETE] ") << game.title
+                              << " | " << game.id << "\n  " << game.diagnostic << '\n';
+                for (const auto& scan_error : errors) std::cerr << scan_error << '\n';
+                return errors.empty() ? 0 : 2;
+            }
+            std::ofstream log(library.home() / "logs/launcher.log", std::ios::app);
+            if (!log) { std::cerr << "Cannot open logs/launcher.log\n"; return 2; }
+            log << "\nRPG2LX launcher | " << library.home().u8string() << '\n';
+            struct Redirect {
+                std::streambuf* out;
+                std::streambuf* err;
+                explicit Redirect(std::ostream& log) : out(std::cout.rdbuf(log.rdbuf())), err(std::cerr.rdbuf(log.rdbuf())) {}
+                ~Redirect() { std::cout.rdbuf(out); std::cerr.rdbuf(err); }
+            } redirect(log);
+            return rpg2lx::run_launcher(library, smoke_frames, screenshot);
+        } catch (const std::exception& e) {
+            std::cerr << "Launcher: " << e.what() << '\n'; return 1;
+        }
+    }
 
     if (command == "--help" || command == "-h") {
         print_help();
@@ -102,4 +154,36 @@ int main(int argc, char* argv[]) {
     std::cerr << "Unknown command: " << command << "\n";
     print_help();
     return 1;
+}
+
+int main(int argc, char* argv[]) {
+    try {
+#ifdef _WIN32
+        // Windows' narrow argv uses the active ANSI code page. Read UTF-16
+        // arguments and convert explicitly so Spanish game folders remain intact.
+        int wide_count = 0;
+        wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &wide_count);
+        if (!wide) throw std::runtime_error("Cannot read command-line arguments");
+        struct FreeArgs { wchar_t** data; ~FreeArgs() { LocalFree(data); } } cleanup{wide};
+        std::vector<std::string> strings;
+        strings.reserve(static_cast<std::size_t>(wide_count));
+        for (int i = 0; i < wide_count; ++i) {
+            const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide[i], -1, nullptr, 0, nullptr, nullptr);
+            if (!length) throw std::runtime_error("Invalid Unicode argument");
+            std::string utf8(static_cast<std::size_t>(length), '\0');
+            WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide[i], -1, utf8.data(), length, nullptr, nullptr);
+            utf8.pop_back();
+            strings.push_back(std::move(utf8));
+        }
+        std::vector<char*> arguments;
+        for (auto& value : strings) arguments.push_back(value.data());
+        (void)argc; (void)argv;
+        return rpg2lx_main(wide_count, arguments.data());
+#else
+        return rpg2lx_main(argc, argv);
+#endif
+    } catch (const std::exception& error) {
+        std::cerr << "RPG2LX: " << error.what() << '\n';
+        return 2;
+    }
 }

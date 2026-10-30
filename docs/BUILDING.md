@@ -3,6 +3,7 @@
 ## Entorno C++ habitual
 
 Se requiere CMake >= 3.16 y compilador C++17. No hay dependencias externas del núcleo actual.
+Para incluir el menú, instalar SDL2 del target y agregar `-DRPG2LX_WITH_SDL=ON`; ver LAUNCHER.md. Sin esa opción se compilan las herramientas de diagnóstico.
 
 ```sh
 cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Debug

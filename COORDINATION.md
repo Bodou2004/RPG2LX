@@ -137,3 +137,22 @@ Pruebas propias: tests/test_json.cpp, tests/test_map.cpp y tests/test_cli_native
 Validación efectiva: herramientas locales Zig 0.13.0/Clang 18.1.6, CMake 4.4.4, Ninja 1.13.2. Build CMake Debug completada, CTest 4/4 grupos pasados. Build Release -O2 -DNDEBUG completada, suites C++ pasadas y CLI 7/7 casos pasados. Primer ensayo de plugins detectó fallo con corchetes en comentarios; corregido, recompilado y suite final pasada. Logs en build/ (no versionados). Sin build ARM, sin renderer ni pruebas R36S.
 
 Siguiente trabajo principal Codex: tilesets y colisiones sobre MapData, después backend SDL2/GLES vanilla. Antigravity: mantener apoyo PortMaster; no modificar src/include/tests/CMake sin coordinar. No declarar juego ejecutable ni paquete listo todavía.
+### C006 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Estado: Codex implementa biblioteca games y menu integrado por pedido del usuario.
+
+Alcance reservado Codex: src/, include/, tests/, CMakeLists.txt y herramientas de build; descubrimiento de juegos, directorios separados, menu SDL2, selección y detalles sin afirmar ejecución de juegos. Contrato de arranque: rpg2lx launcher --home <raiz-rpg2lx>; sin argumentos abre el menu junto al ejecutable. CLI: rpg2lx list --home <raiz-rpg2lx> para diagnóstico. Juegos en games/<carpeta>/data/... o games/<carpeta>/www/data/..., guardados por ID de carpeta fuera de los assets. Antigravity solo debe adaptar portmaster/RPG2LX.sh, port.json, .gptk y documentación PortMaster a ese contrato, sin editar núcleo. No ejecutar inspect sobre un único gamedata fijo.
+
+### C007 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Estado: biblioteca y menú implementados por Codex; integración Windows verificada.
+
+Implementación: src/launcher/library.cpp, model.cpp y frontend.cpp, con interfaces en include/rpg2lx/. La aplicación crea games/saves/config/logs, detecta juegos directos y www, muestra carpetas incompletas, conserva identidad por carpeta y separa partidas/configuración incluso con títulos iguales. Menú SDL2 con listado paginado, pantalla vacía, detalles, comprobación, refresco y navegación teclado/mando. Dibujo solo ante cambios para evitar trabajo continuo innecesario. Jugar se mantiene deshabilitado porque aún no hay runtime de juego.
+
+Arranque: sin argumentos abre menú junto al ejecutable; launcher --home permite ruta explícita; list --home diagnostica biblioteca. Se creó games/ en la raíz de trabajo mediante el ejecutable. Logs fuera de assets. Unicode de títulos y rutas probado; se corrigió lectura ANSI de argv en Windows mediante conversión explícita de UTF-16 a UTF-8.
+
+Validación: CMake SDL2 2.32.10 compila en Windows x86_64. CTest Debug pasa 6/6 grupos: inspector, JSON, mapas, biblioteca/modelo, arranque SDL dummy y 10 casos CLI. Menú renderizado con biblioteca vacía y tres fixtures propias, revisado visualmente. Prueba Release equivalente registrada en build/menu-release-tests.log. No se probaron mandos físicos, firmware R36S, ARM ni ejecución de juegos.
+
+PortMaster: Codex adaptó script/metadatos a launcher --home y games, retiró entrada duplicada gptokeyb, conservó código de salida y limpieza trap EXIT. bash -n pasó. Investigación actualizada contra packaging.html y generador oficial: reqs=opengl significa OpenGL de escritorio, por eso se retiró para no excluir GLES. Plantilla experimental, no publicable todavía. SDL2/fonts documentados en docs/legal; no se redistribuyen juegos.
+
+Coordinación: C006 deja revisión auxiliar a Antigravity; los intentos de introducir el mensaje por UI encontraron ventana minimizada/cambio de entrada del usuario y no hay recepción nueva confirmada. Para no frenar esta entrega, Codex implementó la adaptación y documentó el resultado. Próximo encargo auxiliar: revisar portmaster/ y docs de integración, sin tocar núcleo/tests/CMake.

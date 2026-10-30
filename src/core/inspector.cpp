@@ -168,7 +168,7 @@ static void parse_plugins_js(const std::string& js_content, std::vector<PluginIn
 ProjectMetadata ProjectInspector::inspect(const std::string& project_path) {
     ProjectMetadata meta;
     std::error_code ec;
-    fs::path root(project_path);
+    fs::path root = fs::u8path(project_path);
 
     Logger::info("Inspecting RPG Maker MV project at: " + project_path);
 

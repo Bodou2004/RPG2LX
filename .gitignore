@@ -4,6 +4,7 @@
 /games/
 /saves/
 /logs/
+/config/
 *.log
 *.zip
 *.7z

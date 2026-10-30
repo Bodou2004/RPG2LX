@@ -82,6 +82,38 @@ class NativeCliTests(unittest.TestCase):
         path.write_text('var $plugins = []; runUnknownCode();', encoding="utf-8")
         self.assertEqual(self.run_cli("inspect", self.game).returncode, 2)
 
+    def test_library_layout_and_multiple_games(self):
+        home = Path(self.temp.name) / "RPG2LX home"
+        result = self.run_cli("list", "--home", home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RPG2LX games: 0", result.stdout)
+        for folder in ("games", "saves", "config/games", "logs"):
+            self.assertTrue((home / folder).is_dir())
+        shutil.copytree(self.game, home / "games/First Game")
+        shutil.copytree(self.game, home / "games/Second Game/www")
+        (home / "games/Incomplete").mkdir()
+        result = self.run_cli("list", "--home", home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RPG2LX games: 3", result.stdout)
+        self.assertEqual(result.stdout.count("[MV]"), 2)
+        self.assertIn("[INCOMPLETE]", result.stdout)
+        self.assertFalse((home / "games/First Game/saves").exists())
+        self.assertEqual(self.run_cli("list", "--home").returncode, 1)
+
+    def test_library_directory_collision(self):
+        home = Path(self.temp.name) / "collision"
+        home.mkdir()
+        (home / "games").write_text("This is a file")
+        result = self.run_cli("list", "--home", home)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual((home / "games").read_text(), "This is a file")
+
+    def test_unicode_game_folder(self):
+        unicode_game = Path(self.temp.name) / "Aventura de Luc\u00eda"
+        shutil.copytree(self.game, unicode_game)
+        result = self.run_cli("inspect", unicode_game)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,23 +8,21 @@
   "items_opt": [],
   "attr": {
     "title": "RPG2LX - RPG Maker MV Runtime",
-    "desc": "Independent lightweight runtime and inspector for RPG Maker MV games.",
-    "inst": "Place your RPG Maker MV project files inside the ports/rpg2lx/gamedata directory.",
+    "desc": "RPG Maker MV game library and runtime in development. Menu and data inspection work; game execution is not yet available.",
+    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. Saves and settings are kept outside game assets.",
     "genres": [
-      "rpg",
-      "engine"
+      "rpg"
     ],
     "porter": [
       "PERPLO",
       "Codex",
       "Antigravity"
     ],
-    "image": {},
+    "image": null,
     "rtr": false,
-    "runtime": null,
-    "reqs": [
-      "opengl"
-    ],
+    "exp": true,
+    "runtime": [],
+    "reqs": [],
     "arch": [
       "aarch64"
     ]
