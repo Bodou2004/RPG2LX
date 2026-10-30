@@ -72,7 +72,7 @@ void test_path_with_spaces(const std::string& fixtures_dir) {
 
 int main(int argc, char* argv[]) {
     std::cout << "Starting RPG2LX Core C++ Unit Tests...\n";
-    
+
     std::string fixtures_dir = "./fixtures";
     if (argc > 1) {
         fixtures_dir = argv[1];

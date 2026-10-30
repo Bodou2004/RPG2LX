@@ -10,16 +10,16 @@ Estado: Hito 0/1 — Plantillas técnicas de integración e investigación de fu
 
 La investigación y diseño de los archivos de integración se basan directamente en la documentación técnica oficial de PortMaster y HarbourMaster:
 
-1. **Estructura y Empaquetado oficial (Packaging / New Port Structure):**  
+1. **Estructura y Empaquetado oficial (Packaging / New Port Structure):**
    - Enlace oficial: [https://portmaster.games/packaging.html](https://portmaster.games/packaging.html)
    - Guía de arquitectura de directorios de ports y estándares de nombres.
-2. **Especificación de `port.json` (HarbourMaster metadata schema):**  
+2. **Especificación de `port.json` (HarbourMaster metadata schema):**
    - Enlace oficial: [https://portmaster.games/port-json.html](https://portmaster.games/port-json.html)
    - Especificaciones de atributos v2/v4 (`version`, `items`, `attr.title`, `attr.inst`, `attr.rtr`, `attr.reqs`).
-3. **Plantilla estándar de Scripts de Lanzamiento (`control.txt`, `gptokeyb`):**  
+3. **Plantilla estándar de Scripts de Lanzamiento (`control.txt`, `gptokeyb`):**
    - Enlace oficial: [https://portmaster.games/port-scripting.html](https://portmaster.games/port-scripting.html)
    - Ciclo de vida: Detección de ruta de PortMaster, `source control.txt`, ejecución de `get_controls`, hook de `gptokeyb`, helper de plataforma y `pm_finish`.
-4. **Mapeo de mandos con Gamepad-To-Keyboard (`gptokeyb`):**  
+4. **Mapeo de mandos con Gamepad-To-Keyboard (`gptokeyb`):**
    - Repositorio oficial: [https://github.com/PortsMaster/gptokeyb](https://github.com/PortsMaster/gptokeyb)
 
 ---

@@ -68,9 +68,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Game Title: " << (meta.game_title.empty() ? "(Unknown)" : meta.game_title) << "\n";
         std::cout << "Start Map ID: " << (meta.start_map_id.empty() ? "(None)" : meta.start_map_id) << "\n";
         std::cout << "Screen Resolution: " << meta.screen_width << "x" << meta.screen_height << "\n";
-        std::cout << "Database Records: " << meta.actor_count << " actors, " 
+        std::cout << "Database Records: " << meta.actor_count << " actors, "
                   << meta.map_count << " maps, " << meta.common_event_count << " common events\n";
-        
+
         std::cout << "Detected Plugins: " << meta.plugins.size() << "\n";
         for (const auto& p : meta.plugins) {
             std::cout << "  - " << p.name << " [" << (p.status ? "ENABLED" : "DISABLED") << "]"

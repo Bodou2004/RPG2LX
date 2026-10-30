@@ -42,7 +42,7 @@ void Logger::log(LogLevel level, const std::string& msg) {
     if (static_cast<int>(level) < static_cast<int>(g_current_level)) {
         return;
     }
-    
+
     const char* prefix = "[INFO]";
     switch (level) {
         case LogLevel::Debug: prefix = "[DEBUG]"; break;
@@ -329,8 +329,8 @@ ProjectMetadata ProjectInspector::inspect(const std::string& project_path) {
                 for (const auto& p : meta.plugins) {
                     if (p.status) active_count++;
                 }
-                Logger::info("Detected " + std::to_string(meta.plugins.size()) + 
-                             " plugins declared (" + std::to_string(active_count) + 
+                Logger::info("Detected " + std::to_string(meta.plugins.size()) +
+                             " plugins declared (" + std::to_string(active_count) +
                              " active). Execution isolated.");
             }
         } else meta.warnings.push_back(read_err);
