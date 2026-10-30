@@ -57,7 +57,16 @@ rpg2lx list --home /ruta/a/rpg2lx
 
 El directorio elegido con `--home` no depende del directorio desde el que se invoca el programa. Sin `--home`, se usa la ubicación del ejecutable, no la carpeta de trabajo del shell. En Linux se resuelve `/proc/self/exe` y en Windows la ruta del módulo.
 
+Para usar una exportación original desde otra ruta sin copiar ni convertir sus archivos:
+
+```text
+rpg2lx run /ruta/al/proyecto/MV --home /ruta/a/rpg2lx
+```
+
+Se acepta la carpeta de proyecto/exportación, su `index.html`, un `.rpgproject` o `Game.exe` (solo como referencia de ruta, nunca se ejecuta el EXE). Si los datos están bajo `www/`, se resuelven allí. El inspector usa la misma resolución de rutas y rechaza proyectos identificados explícitamente como MZ.
+
 En esta carpeta de desarrollo Windows, `RPG2LX.cmd` abre la build SDL2 Release (o Debug si no hay Release) usando la raíz del proyecto como home. Así utiliza la carpeta games de la raíz sin copiar el ejecutable. No forma parte del paquete Linux.
+Arrastrar una carpeta MV sobre ese archivo abre directamente el proyecto original. Los logs se guardan bajo el home de RPG2LX, no dentro del juego.
 
 Prueba de renderizado reproducible sin abrir ventana:
 

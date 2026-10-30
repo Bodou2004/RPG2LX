@@ -2,22 +2,25 @@
 
 Implementado por Codex el 2026-10-30. Es una primera porción del runtime MV, no una máquina JavaScript ni soporte completo de juegos.
 
-## Cómo probarlo
+## Abrir archivos originales de RPG Maker MV
 
-1. Abrir RPG2LX.cmd en Windows, o el launcher SDL2 compilado.
-2. Elegir RPG2LX - Primer viaje; en detalles, pulsar X del mando o P del teclado.
-3. Caminar con flechas/D-pad/stick. Hablar con la guía pulsando A/Enter/Z desde la casilla de abajo mirando hacia ella.
-4. Terminar el diálogo: el comando MV 121 activa el switch que habilita la entrada a la casa.
-5. Caminar hasta la puerta. El comando 201 carga Map002; la salida en la casa devuelve al pueblo.
-6. B/Escape vuelve a la biblioteca y termina esta sesión. Todavía no hay guardado.
-
-La demo está instalada localmente en games/RPG2LX Demo y sus datos originales versionados están en fixtures/playable_project. Para instalar otra copia sin sobrescribir una existente:
+El objetivo es ejecutar proyectos exportados por MV. Copiar una carpeta completa a games/ o abrirla directamente con:
 
 ```text
-python tools/install_demo.py --home /ruta/a/rpg2lx
+rpg2lx run /ruta/al/proyecto/MV --home /ruta/a/rpg2lx
 ```
 
-Los PNG de esta demo son dibujos procedurales propios generados con tools/generate_playable_demo.py. No incluyen RTP, assets comerciales ni el runtime propietario de un juego. La fixture usa estructura y comandos de datos MV; no se ha certificado como un proyecto completo editable/ejecutable con el editor original.
+En Windows también se puede arrastrar la carpeta, index.html, Game.exe o .rpgproject sobre RPG2LX.cmd. No se ejecuta el EXE ni se modifican los datos; se resuelven los archivos MV desde esa ruta, incluyendo exportaciones con www/.
+
+En la biblioteca, seleccionar el juego y pulsar X/P en detalles inicia el modo nativo. Flechas/D-pad/stick caminan, A/Enter/Z interactúa y B/Escape vuelve a la biblioteca. Todavía no hay guardado.
+
+## Primera validación con el proyecto del usuario
+
+Project1 se cargó desde su carpeta original de Documentos/Games: System, Map001 (17x13), Tilesets, Actor1/Harold y seis eventos People3. Se verificaron arranque, render de PNG originales, movimiento y colisión con EV002. Se compararon 1102 archivos originales por tamaño/fecha y hashes de JSON/JS/HTML/proyecto: sin cambios. No se añadieron personajes, mapas ni eventos al proyecto del usuario.
+
+Community_Basic y CustomLogo están activos en su plugins.js; se informa explícitamente que aún no se ejecutan. La validación es del modo nativo parcial, no de escenas de arranque, plugins, batalla o juego completo.
+
+La escena sintética anterior se retiró de la biblioteca de trabajo. Sus archivos siguen únicamente como fixtures internas para automatizar regresiones sin redistribuir el proyecto ni assets del usuario.
 
 ## Implementación actual
 

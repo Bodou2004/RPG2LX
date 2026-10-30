@@ -114,6 +114,28 @@ class NativeCliTests(unittest.TestCase):
         result = self.run_cli("inspect", unicode_game)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_inspect_export_root_or_entry_file(self):
+        export = Path(self.temp.name) / "Windows export"
+        shutil.move(self.game, export / "www")
+        (export / "Game.exe").write_bytes(b"Not executed: entry path only")
+        for source in (export, export / "Game.exe", export / "www"):
+            with self.subTest(source=source):
+                result = self.run_cli("inspect", source)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(str(export / "www"), result.stdout)
+
+    def test_engine_identity_is_read_from_export(self):
+        core = self.game / "js/rpg_core.js"
+        core.write_text("Utils.RPGMAKER_NAME = 'MV';\nUtils.RPGMAKER_VERSION = '1.6.2';\n")
+        result = self.run_cli("inspect", self.game)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("MV Version: 1.6.2", result.stdout)
+        core.unlink()
+        (self.game / "js/rmmz_core.js").write_text("// MZ marker")
+        result = self.run_cli("inspect", self.game)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("MZ", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 #include "rpg2lx/core.hpp"
+#include "rpg2lx/project_source.hpp"
 #include "rpg2lx/json/json_parser.hpp"
 #include <iostream>
 #include <fstream>
@@ -168,7 +169,10 @@ static void parse_plugins_js(const std::string& js_content, std::vector<PluginIn
 ProjectMetadata ProjectInspector::inspect(const std::string& project_path) {
     ProjectMetadata meta;
     std::error_code ec;
-    fs::path root = fs::u8path(project_path);
+    const auto source=resolve_mv_project(fs::u8path(project_path));
+    if(!source){meta.warnings.push_back(source.error);return meta;}
+    fs::path root = source.source->root;
+    meta.project_root=root.u8string();meta.engine_version=source.source->engine_version;
 
     Logger::info("Inspecting RPG Maker MV project at: " + project_path);
 

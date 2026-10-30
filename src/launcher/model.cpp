@@ -9,6 +9,17 @@ const GameEntry* LauncherModel::selected() const {
     return index_ < games_.size() ? &games_[index_] : nullptr;
 }
 
+bool LauncherModel::open_project(const std::filesystem::path& project) {
+    GameSession next;
+    std::string error;
+    if(!next.boot(project,error)) {
+        message_="No se pudo abrir el proyecto: "+error;
+        Logger::error(message_);return false;
+    }
+    for(const auto& warning:next.warnings())Logger::warn(warning);
+    session_=std::move(next);message_.clear();return true;
+}
+
 void LauncherModel::refresh() {
     const auto old_id = selected() ? selected()->id : std::string{};
     games_ = library_.scan(errors_);
@@ -38,13 +49,11 @@ void LauncherModel::act(MenuAction action) {
         index_ = (index_ + 1) % games_.size();
     if (action == MenuAction::Play && details_ && selected() && selected()->detected) {
         std::string error;
-        GameSession next;
-        if (!library_.prepare_game(*selected(),error) || !next.boot(selected()->project,error)) {
+        if (!library_.prepare_game(*selected(),error)) {
             message_ = "No se pudo iniciar: " + error;
             Logger::error(message_); return;
         }
-        session_ = std::move(next);
-        message_.clear(); return;
+        open_project(selected()->project);return;
     }
     if (action != MenuAction::Confirm || !selected()) return;
     if (!details_) { details_ = true; return; }

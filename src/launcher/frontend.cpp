@@ -120,7 +120,8 @@ void draw(SDL_Renderer* r, const rpg2lx::LauncherModel& model) {
 } // namespace
 
 namespace rpg2lx {
-int run_launcher(GameLibrary& library, int smoke_frames, const std::string& screenshot, bool start_first) {
+int run_launcher(GameLibrary& library, int smoke_frames, const std::string& screenshot, bool start_first,
+                 const std::filesystem::path& direct_project) {
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "SDL initialization: " << SDL_GetError() << '\n'; return 3;
@@ -145,7 +146,9 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     std::unique_ptr<MapView> map_view;
     std::string map_error;
     std::string reported_session_error;
-    if (start_first) {
+    if(!direct_project.empty()) {
+        if(!model.open_project(direct_project)){std::cerr<<model.message()<<'\n';return 2;}
+    } else if (start_first) {
         model.act(MenuAction::Confirm); model.act(MenuAction::Play);
         if (!model.session()) { std::cerr << model.message() << '\n'; return 2; }
     }
@@ -270,13 +273,13 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         const Uint32 elapsed = SDL_GetTicks()-frame_started;
         if (elapsed < 16) SDL_Delay(16-elapsed);
     }
-    if (start_first && (!map_error.empty() || (model.session() && !model.session()->error().empty()))) return 2;
+    if ((start_first || !direct_project.empty()) && (!map_error.empty() || (model.session() && !model.session()->error().empty()))) return 2;
     return 0;
 }
 } // namespace rpg2lx
 #else
 namespace rpg2lx {
-int run_launcher(GameLibrary&, int, const std::string&, bool) {
+int run_launcher(GameLibrary&, int, const std::string&, bool, const std::filesystem::path&) {
     std::cerr << "This diagnostic build has no graphical menu. Build with RPG2LX_WITH_SDL=ON.\n";
     return 3;
 }

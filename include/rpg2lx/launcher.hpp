@@ -10,6 +10,7 @@ public:
     explicit LauncherModel(GameLibrary& library);
     void act(MenuAction action);
     void refresh();
+    bool open_project(const std::filesystem::path& project);
     const GameEntry* selected() const;
     const std::vector<GameEntry>& games() const { return games_; }
     const std::vector<std::string>& errors() const { return errors_; }
@@ -31,5 +32,6 @@ private:
 };
 
 int run_launcher(GameLibrary& library, int smoke_frames = 0,
-                 const std::string& screenshot = {}, bool start_first = false);
+                 const std::string& screenshot = {}, bool start_first = false,
+                 const std::filesystem::path& direct_project = {});
 } // namespace rpg2lx

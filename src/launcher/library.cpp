@@ -1,5 +1,6 @@
 #include "rpg2lx/library.hpp"
 #include "rpg2lx/json/json_parser.hpp"
+#include "rpg2lx/project_source.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -41,9 +42,9 @@ GameEntry inspect_folder(const fs::path& folder) {
     game.id = folder.filename().u8string();
     game.title = game.id;
     game.project = folder;
-    // Desktop deployments commonly place the complete MV project under www/.
-    if (!file_exists(folder / "data/System.json") && real_directory(folder / "www"))
-        game.project = folder / "www";
+    const auto source=resolve_mv_project(folder);
+    if(!source){game.diagnostic=source.error;return game;}
+    game.project=source.source->root;
     const auto system = game.project / "data/System.json";
     std::error_code ec;
     const auto size = fs::file_size(system, ec);

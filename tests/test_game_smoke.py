@@ -1,5 +1,6 @@
 """Render actual MV-format map data with SDL dummy; never substitute a Python engine."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -26,6 +27,13 @@ class NativeGameSmoke(unittest.TestCase):
         env.update(SDL_VIDEODRIVER='dummy',SDL_AUDIODRIVER='dummy')
         return subprocess.run([str(BINARY),'launcher','--home',str(self.home),'--start-first',
                                '--smoke-frames','3','--screenshot',str(self.home/'map.bmp')],
+                              env=env,capture_output=True,timeout=20)
+
+    def render_source(self,source):
+        env=os.environ.copy()
+        env.update(SDL_VIDEODRIVER='dummy',SDL_AUDIODRIVER='dummy')
+        return subprocess.run([str(BINARY),'run',str(source),'--home',str(self.home),
+                               '--smoke-frames','3','--screenshot',str(self.home/'direct.bmp')],
                               env=env,capture_output=True,timeout=20)
 
     def log(self):
@@ -67,6 +75,28 @@ class NativeGameSmoke(unittest.TestCase):
         path.write_text(json.dumps(data))
         self.assertEqual(self.render().returncode,2)
         self.assertIn('Unsupported event command 355',self.log())
+
+    def test_direct_project_does_not_change_source_files(self):
+        def snapshot():
+            return {str(p.relative_to(self.project)):hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in self.project.rglob('*') if p.is_file()}
+        before=snapshot()
+        self.assertEqual(self.render_source(self.project).returncode,0,self.log())
+        self.assertEqual(snapshot(),before)
+
+    def test_direct_desktop_export_with_www(self):
+        export=self.home/'Original export'
+        shutil.move(self.project,export/'www')
+        entry=export/'Game.exe'
+        entry.write_bytes(b'Not executed: resolve the export beside this file')
+        self.assertEqual(self.render_source(entry).returncode,0,self.log())
+        self.assertFalse((export/'logs').exists())
+        self.assertFalse((export/'www/saves').exists())
+
+    def test_direct_mz_is_rejected(self):
+        (self.project/'js/rmmz_core.js').write_text('// MZ marker')
+        self.assertEqual(self.render_source(self.project).returncode,2)
+        self.assertIn('MZ',self.log())
 
 
 if __name__=='__main__':unittest.main()

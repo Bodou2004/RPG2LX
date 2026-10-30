@@ -26,7 +26,7 @@ def main():
     flags = ["-std=c++17", "-Wall", "-Wextra", "-Wpedantic", "-Wno-nullability-completeness",
              "-I", str(ROOT / "include")]
     flags += ["-O2", "-DNDEBUG"] if args.release else ["-O0", "-g"]
-    core = ["src/core/inspector.cpp", "src/mv/map.cpp", "src/mv/session.cpp", "src/mv/tile_layout.cpp",
+    core = ["src/core/inspector.cpp", "src/mv/map.cpp", "src/mv/session.cpp", "src/mv/project_source.cpp", "src/mv/tile_layout.cpp",
             "src/launcher/library.cpp", "src/launcher/model.cpp"]
     targets = {"rpg2lx": [*core, "src/cli/main.cpp", "src/launcher/frontend.cpp"],
                "test_inspector": [*core, "tests/test_inspector.cpp"],

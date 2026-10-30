@@ -1,4 +1,6 @@
 #include "rpg2lx/session.hpp"
+#include "rpg2lx/project_source.hpp"
+#include "rpg2lx/core.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -68,7 +70,9 @@ bool GameSession::boot(const fs::path& project, std::string& error) {
     error.clear();
     try {
         GameSession next;
-        next.project_ = fs::canonical(project);
+        const auto source=resolve_mv_project(project);
+        if(!source)throw std::runtime_error(source.error);
+        next.project_ = source.source->root;
         const auto system = read_json(next.project_ / "data/System.json");
         if (!system.is_object()) throw std::runtime_error("System.json must be object");
         if (enabled(system, "hasEncryptedImages")) throw std::runtime_error("Encrypted images are not supported by this native build");
@@ -91,6 +95,9 @@ bool GameSession::boot(const fs::path& project, std::string& error) {
         }
         if (!next.load_map(map, x, y, error)) return false;
         next.warnings_.push_back("Modo nativo experimental: plugins JavaScript, batalla y audio pendientes.");
+        const auto metadata=ProjectInspector::inspect(next.project_.u8string());
+        for(const auto& plugin:metadata.plugins)if(plugin.status)
+            next.warnings_.push_back("Plugin activo no ejecutado: "+plugin.name);
         *this = std::move(next);
         check_autorun();
         return true;

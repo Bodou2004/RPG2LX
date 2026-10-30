@@ -20,6 +20,7 @@ add_library(rpg2lx_core STATIC
     src/core/inspector.cpp
     src/mv/map.cpp
     src/mv/session.cpp
+    src/mv/project_source.cpp
     src/mv/tile_layout.cpp
     src/launcher/library.cpp
     src/launcher/model.cpp

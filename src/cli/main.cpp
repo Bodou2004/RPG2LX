@@ -20,6 +20,7 @@ void print_help() {
     std::cout << "  rpg2lx inspect-map <map.json>  Validate map layers and event data\n";
     std::cout << "  rpg2lx launcher [--home DIR]  Open the game library (default command)\n";
     std::cout << "  rpg2lx list [--home DIR]      List folders detected in games/\n";
+    std::cout << "  rpg2lx run <MV export> [--home DIR] Open an existing MV project in place\n";
 }
 
 void print_version() {
@@ -30,23 +31,25 @@ void print_version() {
 static int rpg2lx_main(int argc, char* argv[]) {
     std::string command = argc < 2 ? "launcher" : argv[1];
 
-    if (command == "launcher" || command == "list") {
+    if (command == "launcher" || command == "list" || command == "run") {
         try {
+            if(command=="run" && argc<3){std::cerr<<"run requires an existing MV project path\n";return 1;}
+            const auto direct_project=command=="run"?std::filesystem::u8path(argv[2]):std::filesystem::path{};
             auto home = rpg2lx::executable_directory(argv[0]);
             int smoke_frames = 0;
             bool start_first = false;
             std::string screenshot;
-            for (int i = 2; i < argc; ++i) {
+            for (int i = command=="run"?3:2; i < argc; ++i) {
                 const std::string arg = argv[i];
                 if (arg == "--home" && i+1 < argc) home = std::filesystem::u8path(argv[++i]);
                 else if (command == "launcher" && arg == "--start-first") start_first = true;
-                else if (command == "launcher" && arg == "--smoke-frames" && i+1 < argc) {
+                else if (command != "list" && arg == "--smoke-frames" && i+1 < argc) {
                     const std::string number = argv[++i];
                     if (number.empty() || number.find_first_not_of("0123456789") != std::string::npos)
                         throw std::runtime_error("--smoke-frames expects an integer between 1 and 60");
                     smoke_frames = std::stoi(number);
                     if (smoke_frames < 1 || smoke_frames > 60) throw std::runtime_error("Invalid smoke frame count");
-                } else if (command == "launcher" && arg == "--screenshot" && i+1 < argc) screenshot = argv[++i];
+                } else if (command != "list" && arg == "--screenshot" && i+1 < argc) screenshot = argv[++i];
                 else { std::cerr << "Invalid or incomplete launcher option: " << arg << '\n'; return 1; }
             }
             if (!screenshot.empty() && smoke_frames == 0) {
@@ -74,7 +77,7 @@ static int rpg2lx_main(int argc, char* argv[]) {
                 explicit Redirect(std::ostream& log) : out(std::cout.rdbuf(log.rdbuf())), err(std::cerr.rdbuf(log.rdbuf())) {}
                 ~Redirect() { std::cout.rdbuf(out); std::cerr.rdbuf(err); }
             } redirect(log);
-            return rpg2lx::run_launcher(library, smoke_frames, screenshot, start_first);
+            return rpg2lx::run_launcher(library, smoke_frames, screenshot, start_first,direct_project);
         } catch (const std::exception& e) {
             std::cerr << "Launcher: " << e.what() << '\n'; return 1;
         }
@@ -120,6 +123,8 @@ static int rpg2lx_main(int argc, char* argv[]) {
         std::cout << "\n--- Project Inspection Summary ---\n";
         std::cout << "Status: " << (meta.is_valid ? "VALID RPG Maker MV Project Structure" : "INVALID / INCOMPLETE") << "\n";
         std::cout << "Game Title: " << (meta.game_title.empty() ? "(Unknown)" : meta.game_title) << "\n";
+        std::cout << "Project Root: " << meta.project_root << "\n";
+        if(!meta.engine_version.empty())std::cout << "MV Version: " << meta.engine_version << "\n";
         std::cout << "Start Map ID: " << (meta.start_map_id.empty() ? "(None)" : meta.start_map_id) << "\n";
         std::cout << "Screen Resolution: " << meta.screen_width << "x" << meta.screen_height << "\n";
         std::cout << "Database Records: " << meta.actor_count << " actors, "

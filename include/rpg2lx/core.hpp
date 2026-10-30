@@ -35,6 +35,8 @@ struct PluginInfo {
 };
 
 struct ProjectMetadata {
+    std::string project_root;
+    std::string engine_version;
     std::string game_title;
     std::string start_map_id;
     int screen_width = 816;

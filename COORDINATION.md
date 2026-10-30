@@ -173,3 +173,19 @@ Acceso: RPG2LX.cmd → elegir RPG2LX - Primer viaje → detalles → X/P. A/Ente
 Pruebas efectivas: SessionTests reproduce ese recorrido en C++, bloqueo de NPC/agua/muros, reverso del destino, interpolación, paginación, arranque fallido atómico y rechazo de script355. NativeGameSmoke ejecuta renderer real en driver dummy y comprueba píxeles de tileset/player, ambos mapas y diagnósticos por PNG faltante/cifrado/autorun desconocido. CTest Debug y Release 8/8 grupos pasan; logs finales en build/session-debug-tests.log y build/session-release-tests.log. PNG del mapa revisado visualmente. Sin mandos físicos ni R36S/ARM probados.
 
 Límites y siguiente núcleo: variables/condiciones/elecciones/eventos comunes, audio y guardado siguen pendientes junto con batalla/menús/plugins y muchos efectos. Matriz y docs actualizadas; no presentar modo nativo como compatibilidad universal. Antigravity puede revisar PortMaster/documentación, manteniendo núcleo/tests/render reservados a Codex.
+### C010 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+El usuario corrige el enfoque: no crear un juego, usar los archivos exportados por MV. Proporcionó Project1 en C:\Users\herre\OneDrive\Documentos\Games\Project1. Codex detuvo trabajo de contenido, archivó la demo visible fuera de games y abrió el proyecto original directamente, en modo lectura. Assets de pruebas permanecen solo como fixtures internas, no como entrega principal.
+
+Cambios de código en curso: resolución común de raíz MV/www/index.html/Game.exe/.rpgproject, detección explícita de MZ, comando run con ruta de proyecto sin importación/conversión, advertencias de plugins activos no ejecutados y arranque .cmd por carpeta arrastrada. Prueba real: Map001 (17x13), Harold Actor1 y seis eventos People3 renderizados con PNG originales de Project1. Community_Basic y CustomLogo activos se informan como no ejecutados. Esto valida carga/render nativo, no ejecución completa de scripts MV.
+
+Se registró snapshot de 1102 archivos originales y hashes de JSON/JS/HTML/proyecto, sin cambios tras la ejecución. Registros e imágenes resultantes en build/ y logs de RPG2LX. Una copia local completa de Project1 se prepara en games/Project1 (ignorada por Git); no versionar assets ni archivos del proyecto del usuario. Priorizar problemas encontrados en juegos reales a partir de ahora.
+### C011 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Entrega revisada con el proyecto real: Project1 es ahora el único juego de games/. Copia local completa de 1102 archivos, excluida de Git; originales conservados sin cambios. La demo anterior quedó archivada en build/ y solo sus fixtures de regresión siguen en fuentes.
+
+Probado contra el original: arranque en Map001 (8,6), movimiento a (9,6), bloqueo por EV002 en (10,6), recorrido alternativo y retorno al punto inicial. El probe C++ temporal vive en build/, no introduce cambios en el juego. Render Release también probado desde la biblioteca real games/Project1; captura en build/Project1-release.png.
+
+Cambios integrados: resolve_mv_project compartido por inspector/biblioteca/sesión; raíz o www, index.html, Game.exe y .rpgproject como referencias de ruta, sin ejecutar el EXE ni modificar el juego. Detección MZ explícita y versión declarada por rpg_core. Comando run permite ruta externa; RPG2LX.cmd permite arrastrar la carpeta. Plugins activos no ejecutados quedan en el registro, incluidos Community_Basic y CustomLogo de Project1.
+
+Regresiones Debug y Release: CTest 8/8 grupos pasados; nuevos casos cubren export www, entrada Game.exe no ejecutada, identidad MV/MZ, apertura directa y hashes del árbol fuente inalterados. Logs en build/export-debug-tests.log y export-release-tests.log. No afirmar ejecución de los scripts originales ni compatibilidad completa; siguiente trabajo principal debe resolver límites reales observados en Project1.

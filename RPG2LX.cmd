@@ -7,5 +7,10 @@ if not exist "%RPG2LX_BINARY%" (
     echo RPG2LX must be built with SDL2 first. See docs\LAUNCHER.md.
     exit /b 1
 )
+if not "%~1"=="" if exist "%~1" goto direct_project
 "%RPG2LX_BINARY%" launcher --home "%RPG2LX_PROJECT%." %*
+exit /b %ERRORLEVEL%
+
+:direct_project
+"%RPG2LX_BINARY%" run "%~1" --home "%RPG2LX_PROJECT%."
 exit /b %ERRORLEVEL%
