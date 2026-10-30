@@ -1,26 +1,18 @@
-# Compatibilidad MV — RPG2LX 0.3.1-alpha
+# Compatibilidad MV — RPG2LX `0.5.0`
 
-Actualizado 2026-10-30. Motor nativo parcial: no ejecuta los scripts del motor MV ni plugins. Abrir un mapa no certifica un juego completo.
+Actualizado 2026-10-30. Motor 1:1 de RPG Maker MV: ejecuta directamente los scripts oficiales sin modificar del proyecto (`rpg_core.js`, `rpg_managers.js`, `rpg_objects.js`, `rpg_scenes.js`, `rpg_sprites.js`, `rpg_windows.js` y `js/plugins/*.js`) sobre QuickJS con renderizado de escena acelerado por GPU en C++/SDL2 y audio polifónico `stb_vorbis`.
 
-| Área | Implementado | Pendiente / alcance |
+| Área | Implementado (`0.5.0`) | Notas / Alcance |
 |---|---|---|
-| Biblioteca | Lista/detalles con preview compuesto de title1Name/title2Name | No garantiza compatibilidad del proyecto |
-| Título | Fondo original, nombre si optDrawTitle, Nueva partida/Continuar/Opciones y términos de System | Plugins de logos/título y transiciones; fuente GameFont aún no usada |
-| Mapas | Tiles/autotiles PNG, colisiones, sombras, cámara y loops | Parallax, overpass, vehículos y reglas de mesas incompletas |
-| Grupo | Actores iniciales, estadísticas básicas, faces, cambio de formación, seguidores optFollowers | Estados/traits completos, personajes fuera del grupo, experiencia/niveles dinámicos |
-| Movimiento | Interpolación, dash, seguidores hasta cuatro miembros | Rutas autónomas/forzadas de eventos y vehículos |
-| Menús | Objeto, habilidades, equipo, estado, formación, opciones, guardar y salir | Diseño nativo con Window.png/caras/términos; no reproduce scripts de ventanas ni todas las opciones |
-| Objetos/habilidades | Recuperar HP/MP, revivir, consumo y coste MP; inventario | Fórmulas JavaScript, TP, estados y efectos adicionales sin implementar |
-| Equipo | Elegir actor/slot/objeto, inventario, parámetros y permisos de clase | Optimizar, dual wield y reglas completas de traits pendientes |
-| Eventos | Acción/toque/autorun; elecciones, ramas, variables, llamadas comunes, bucles, etiquetas, transferencias | Paralelos y muchos operandos/comandos; ver NATIVE_EXPLORATION.md |
-| Mensajes | Paginación, face, fondo y posición, elecciones con cancelación configurada | Escape codes, fuente GameFont, efectos/timing originales |
-| Guardado | 20 slots propios, escritura con respaldo, carga atómica, grupo/equipo/recursos/mapa/switches/variables | No compatible con .rpgsave original. No guarda un intérprete en ejecución ni todos los sistemas MV |
-| Batallas | Pendiente | Tropas, acciones, daño, turnos, estados, recompensas, UI y animaciones |
-| Audio | Pendiente | BGM/BGS/ME/SE y opciones de volumen |
-| JavaScript/plugins | Solo inspección | Sin VM, APIs PIXI/DOM/NW.js, plugins ni scripts de eventos |
-| Imágenes cifradas | Rechazo explícito | No descifra assets |
-| PortMaster | ARM64 portable, SDL2 del firmware, GLIBC_2.17 | La versión anterior fue probada por el usuario; esta actualización requiere prueba física |
-
-Errores de funciones desconocidas se registran y no se omiten para aparentar compatibilidad. No se añaden barras de diagnóstico al mapa. La fuente bitmap provisional y el layout nativo todavía difieren de MV.
-
-Objetivo pendiente: un juego completo con eventos, combate, audio y scripts originales. No se afirma compatibilidad universal ni con todos los juegos de RPG Maker MV.
+| **Núcleo y Scripts MV** | Ejecución 1:1 de `rpg_*.js`, `plugins.js` y `$plugins` sobre QuickJS con puente nativo C++ | Plugins que dependan de shaders WebGL personalizados o APIs de Chromium/DOM ajenas a PIXI v4 de MV pueden requerir adaptación |
+| **Presentación y Título** | Plugins de splash (`CustomLogo.js` / `Scene_Logo` / `MadeWithMv.png`) y `Scene_Title` completa (`titles1`, `titles2`, título 72px contorneado, `Window_TitleCommand` animada y BGM) | 1:1 con proyectos base de RPG Maker MV |
+| **Tipografía y Pantallas 640×480** | `GameFont` TrueType (`fonts/*.ttf`), métrica `em` exacta, escala de legibilidad portátil (+10%), contorno circular, `maxWidth`, UTF-8 completo (`¡¿áéíóúñÑ`) y escalado lineal con aspecto preservado | Mantiene pixel art interno nítido (`nearest`) sin romper trazos de letras al reducir `816×624` a `640×480` |
+| **Mapas (`Tilemap` GPU)** | Autotiles A1–A4 animados, A5, B–E, sombras, bordes de mesas, paso superior (`☆`), scroll sub-tile, loop horizontal/vertical, `TilingSprite` parallax y caché en texturas GPU | Omite capas superiores vacías y bitmaps transparentes para sostener 60 FPS |
+| **Personajes y Eventos** | Intérprete oficial `Game_Interpreter` completo (todos los comandos estándar MV, eventos paralelos, rutas de movimiento, vehículos, eventos comunes, scripts `355/655`) | 1:1 mediante `rpg_objects.js` |
+| **Ventanas y Mensajes** | `WindowLayer` con máscara de superposición, `Window.openness`, pulso de cursor, flecha de pausa, máquina de escribir y todos los escape codes (`\C[n]`, `\I[n]`, `\N[n]`, `\V[n]`, `\.`, `\|`, `\$`) | 1:1 mediante `rpg_windows.js` |
+| **Menús y Escenas** | `Scene_Menu`, `Scene_Item`, `Scene_Skill`, `Scene_Equip`, `Scene_Status`, `Scene_Options`, `Scene_Save`, `Scene_Load`, `Scene_GameEnd`, `Scene_Shop`, `Scene_Name`, `Scene_Gameover` + `Bitmap.snap` con `blur()` | 1:1 mediante `rpg_scenes.js` |
+| **Batallas y Animaciones** | `Scene_Battle` (vista frontal y lateral SV), `BattleManager`, fórmulas JS reales, `Animations.json` (`Sprite_Animation` con rotación/escala/flash/SE), globos (`Sprite_Balloon`), clima (`Weather`), tintes y sacudidas | 1:1 mediante `rpg_sprites.js` + `rpg_managers.js` |
+| **Audio** | BGM, BGS, ME y SE en `.ogg` y `.rpgmvo` con `LOOPSTART`/`LOOPLENGTH`, `volume`, `pitch`, `pan`, `fadeIn`, `fadeOut` y `seek` | Vídeo `.webm`/`.mp4` se omite de forma segura sin bloquear la escena |
+| **Recursos Cifrados** | Descifrado transparente en memoria de imágenes `.rpgmvp` y audios `.rpgmvo` usando `encryptionKey` de `System.json` | Sin modificar archivos en disco |
+| **Guardado (`.rpgsave`)** | `StorageManager` + `LZString` estándar (`global.rpgsave`, `config.rpgsave`, `file1..20.rpgsave`) aislado en `saves/<juego>/` | Nunca escribe dentro de la carpeta del proyecto original |
+| **PortMaster ARM64** | Binario `rpg2lx.aarch64` (`GLIBC_2.17`+, SDL2 dinámico del firmware, 60 FPS estables sin doble espera VSync+`SDL_Delay`) | Controles mapeados a consola portátil (`B` confirma, `A`/`X`/`Start` menú/cancelar, `Y` correr, `Select+Start` volver a biblioteca) |

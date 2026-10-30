@@ -1,5 +1,6 @@
 #pragma once
 #include "rpg2lx/map.hpp"
+#include "rpg2lx/js/js_runtime.hpp"
 #include <map>
 #include <set>
 #include <deque>
@@ -56,6 +57,7 @@ public:
     const std::string& notice() const { return notice_; }
     bool wants_library() const { return library_requested_; }
     const JsonValue& system() const { return system_; }
+    std::string encryption_key() const { const auto* k = system_.find("encryptionKey"); return (k && k->is_string()) ? k->str_val : ""; }
     std::string term(const std::string& group, int index, const std::string& fallback) const;
     std::string title_image(int layer) const;
     std::string game_title() const;
@@ -95,6 +97,9 @@ public:
     const std::string& error() const { return error_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
     bool switch_value(int id) const;
+    JsRuntime& js_runtime() { return js_runtime_; }
+    const JsRuntime& js_runtime() const { return js_runtime_; }
+    JsRuntime::BattlerContext actor_context(const PartyActor& actor) const;
 private:
     bool load_map(int map, int x, int y, std::string& error);
     bool conditions_met(const JsonValue& conditions, int event_id) const;
@@ -114,6 +119,7 @@ private:
     void skip_branch(int indent);
     bool conditional(const EventCommand& command) const;
     bool tile_passage(int x, int y, unsigned bit) const;
+    void bind_js_hooks();
     std::filesystem::path project_;
     MapData map_;
     TilesetData tileset_;
@@ -155,5 +161,6 @@ private:
     std::deque<std::string> message_queue_;
     std::vector<std::string> warnings_;
     bool autorun_pending_ = true;
+    JsRuntime js_runtime_;
 };
 } // namespace rpg2lx

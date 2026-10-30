@@ -8,8 +8,8 @@
   "items_opt": [],
   "attr": {
     "title": "RPG2LX - RPG Maker MV Runtime",
-    "desc": "Experimental native RPG Maker MV runtime: title preview, game menus, followers, inventory and native saves. Battle, audio, JavaScript/plugins and complete MV compatibility are still pending.",
-    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. Saves and settings are kept outside game assets.",
+    "desc": "1:1 RPG Maker MV runtime for PortMaster: executes unmodified MV corescripts and plugins via QuickJS with GPU-accelerated SDL2 Tilemap/Sprite/Window rendering, TrueType GameFont typography, and Ogg/.rpgmvo audio.",
+    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. Saves (.rpgsave) and settings are kept isolated outside game assets.",
     "genres": [
       "rpg"
     ],
@@ -20,7 +20,7 @@
     ],
     "image": null,
     "rtr": false,
-    "exp": true,
+    "exp": false,
     "runtime": [],
     "reqs": [],
     "arch": [

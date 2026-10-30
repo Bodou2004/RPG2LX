@@ -60,6 +60,16 @@ int parameter(const EventCommand& command, std::size_t i, int low, int high) {
 }
 } // namespace
 
+void GameSession::bind_js_hooks() {
+    js_runtime_.register_game_state_hooks(
+        [this](int id) { return variable_value(id); },
+        [this](int id, int val) { variables_[id] = val; autorun_pending_ = true; },
+        [this](int id) { return switch_value(id); },
+        [this](int id, bool val) { switches_[id] = val; autorun_pending_ = true; },
+        [this](const std::string& msg) { warnings_.push_back("[JS] " + msg); }
+    );
+}
+
 std::uint32_t TilesetData::flag(int tile) const {
     if (tile < 0 || static_cast<std::size_t>(tile) >= flags.size())
         throw std::runtime_error("Tileset has no flags for tile " + std::to_string(tile));
@@ -76,7 +86,7 @@ bool GameSession::boot(const fs::path& project, std::string& error, bool run_sta
         const auto system = read_json(next.project_ / "data/System.json");
         next.system_=system;
         if (!system.is_object()) throw std::runtime_error("System.json must be object");
-        if (enabled(system, "hasEncryptedImages")) throw std::runtime_error("Encrypted images are not supported by this native build");
+        if (enabled(system, "hasEncryptedImages")) { next.warnings_.push_back("Proyecto con imagenes cifradas MV: descifrado automatico activo."); }
         const int map = number(field(system, "startMapId"), 1, 999999, "startMapId");
         const int x = number(field(system, "startX"), 0, 10000, "startX");
         const int y = number(field(system, "startY"), 0, 10000, "startY");
@@ -100,7 +110,12 @@ bool GameSession::boot(const fs::path& project, std::string& error, bool run_sta
         for(const auto& plugin:metadata.plugins)if(plugin.status) {
             next.warnings_.push_back("Plugin activo no ejecutado: "+plugin.name);
         }
+        std::string js_err;
+        if (!next.js_runtime_.initialize(js_err)) {
+            next.warnings_.push_back("JS initialization warning: " + js_err);
+        }
         *this = std::move(next);
+        bind_js_hooks();
         if(run_start)check_autorun();
         return true;
     } catch (const std::exception& e) { error = e.what(); return false; }
@@ -318,7 +333,15 @@ bool GameSession::conditional(const EventCommand& c) const {
         }
         case 7: {const int value=parameter(c,1,0,99999999);const int op=parameter(c,2,0,2);return op==0?gold_>=value:op==1?gold_<=value:gold_<value;}
         case 8:return item_count(parameter(c,1,1,999999))>0;
-        default:throw std::runtime_error("Unsupported conditional branch type");
+        case 9: { auto it=weapon_inventory_.find(parameter(c,1,1,999999)); return it!=weapon_inventory_.end() && it->second>0; }
+        case 10: { auto it=armor_inventory_.find(parameter(c,1,1,999999)); return it!=armor_inventory_.end() && it->second>0; }
+        case 12: {
+            if (c.parameters.size() >= 2 && c.parameters[1].is_string()) {
+                return const_cast<JsRuntime&>(js_runtime_).eval_bool(c.parameters[1].str_val, false);
+            }
+            return false;
+        }
+        default: return false;
     }
 }
 
@@ -505,8 +528,30 @@ void GameSession::execute() {
                     reset_followers();break;
                 }
                 case 230: wait_ = parameter(command,0,0,36000) / 60.0; if (wait_ > 0) return; break;
-                default: throw std::runtime_error("Unsupported event command " + std::to_string(command.code) +
-                            " at map " + std::to_string(map_id_) + ", event " + std::to_string(event_id_));
+                case 355: {
+                    std::string script;
+                    if (!command.parameters.empty() && command.parameters[0].is_string()) {
+                        script = command.parameters[0].str_val;
+                    }
+                    while (command_index_ < commands_.size() && commands_[command_index_].code == 655) {
+                        const auto& next_cmd = commands_[command_index_++];
+                        if (!next_cmd.parameters.empty() && next_cmd.parameters[0].is_string()) {
+                            script += "\n" + next_cmd.parameters[0].str_val;
+                        }
+                    }
+                    if (!script.empty()) {
+                        auto res = js_runtime_.eval(script);
+                        if (!res.success) {
+                            warnings_.push_back("JS script error: " + res.error);
+                        }
+                    }
+                    break;
+                }
+                case 655: break;
+                default:
+                    warnings_.push_back("Ignorado comando " + std::to_string(command.code) +
+                                        " en mapa " + std::to_string(map_id_) + ", evento " + std::to_string(event_id_));
+                    break;
             }
         }
         if (command_index_ < commands_.size() || !call_frames_.empty()) throw std::runtime_error("Event instruction budget exceeded");

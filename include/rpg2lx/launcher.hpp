@@ -10,7 +10,7 @@ public:
     explicit LauncherModel(GameLibrary& library);
     void act(MenuAction action);
     void refresh();
-    bool open_project(const std::filesystem::path& project, bool title=true);
+    bool open_project(const std::filesystem::path& project, bool title = true);
     const GameEntry* selected() const;
     const std::vector<GameEntry>& games() const { return games_; }
     const std::vector<std::string>& errors() const { return errors_; }
@@ -20,6 +20,11 @@ public:
     const std::string& message() const { return message_; }
     GameSession* session() { return session_ ? &*session_ : nullptr; }
     const GameSession* session() const { return session_ ? &*session_ : nullptr; }
+
+    bool has_mv_project() const { return !mv_project_.empty(); }
+    const std::filesystem::path& mv_project() const { return mv_project_; }
+    const std::filesystem::path& mv_save_dir() const { return mv_save_dir_; }
+
 private:
     GameLibrary& library_;
     std::vector<GameEntry> games_;
@@ -29,6 +34,8 @@ private:
     bool quit_ = false;
     std::string message_;
     std::optional<GameSession> session_;
+    std::filesystem::path mv_project_;
+    std::filesystem::path mv_save_dir_;
 };
 
 int run_launcher(GameLibrary& library, int smoke_frames = 0,

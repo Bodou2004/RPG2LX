@@ -1,7 +1,8 @@
 @echo off
 rem Windows development entry point. The PortMaster entry point is RPG2LX.sh.
 set "RPG2LX_PROJECT=%~dp0"
-set "RPG2LX_BINARY=%RPG2LX_PROJECT%build\cmake-release\rpg2lx.exe"
+set "RPG2LX_BINARY=%RPG2LX_PROJECT%build\native-release\rpg2lx-sdl.exe"
+if not exist "%RPG2LX_BINARY%" set "RPG2LX_BINARY=%RPG2LX_PROJECT%build\cmake-release\rpg2lx.exe"
 if not exist "%RPG2LX_BINARY%" set "RPG2LX_BINARY=%RPG2LX_PROJECT%build\cmake-debug\rpg2lx.exe"
 if not exist "%RPG2LX_BINARY%" (
     echo RPG2LX must be built with SDL2 first. See docs\LAUNCHER.md.

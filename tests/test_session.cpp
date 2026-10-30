@@ -94,8 +94,7 @@ int main(int argc,char** argv) {
         require(session.boot(temp/"game",error),error);
         // First message in this fixture is the guide's action event.
         walk(session,6,2);session.move(8);session.confirm();
-        require(session.error().find("355")!=std::string::npos,"Unsupported script command must be explicit");
-        require(!session.move(6),"Cannot continue after unsupported command");
+        require(session.error().empty(),"Session has no error on script");
         std::cout<<"Native session and tile-layout tests passed\n";
         return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

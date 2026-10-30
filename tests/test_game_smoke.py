@@ -60,23 +60,45 @@ class NativeGameSmoke(unittest.TestCase):
     def test_missing_png_has_explicit_error(self):
         (self.project/'img/tilesets/Demo_A2.png').unlink()
         self.assertEqual(self.render().returncode,2)
-        self.assertIn('Missing or oversized PNG',self.log())
+        self.assertIn('Missing or oversized',self.log())
 
-    def test_encrypted_images_are_rejected(self):
+    def test_encrypted_images_are_supported(self):
+        png_path=self.project/'img/tilesets/Demo_A2.png'
+        raw=bytearray(png_path.read_bytes())
+        key_hex='0102030405060708090a0b0c0d0e0f10'
+        key=bytes.fromhex(key_hex)
+        for i in range(16):
+            raw[i]^=key[i]
+        rpgmvp_header=bytes([0x52,0x50,0x47,0x4D,0x56,0x00,0x00,0x00,0x00,0x03,0x01,0x00,0x00,0x00,0x00,0x00])
+        (self.project/'img/tilesets/Demo_A2.rpgmvp').write_bytes(rpgmvp_header+bytes(raw))
+        png_path.unlink()
         path=self.project/'data/System.json'
-        data=json.loads(path.read_text());data['hasEncryptedImages']=True
+        data=json.loads(path.read_text())
+        data['hasEncryptedImages']=True
+        data['encryptionKey']=key_hex
         path.write_text(json.dumps(data))
-        self.assertEqual(self.render().returncode,2)
-        self.assertIn('Encrypted images',self.log())
+        self.assertEqual(self.render().returncode,0,self.log())
 
-    def test_unknown_autorun_command_stops_with_diagnostic(self):
+    def test_autorun_js_script_command_is_supported(self):
         path=self.project/'data/Map001.json'
         data=json.loads(path.read_text())
         data['events'][1]['pages'][0]['trigger']=3
-        data['events'][1]['pages'][0]['list']=[{'code':355,'indent':0,'parameters':['unavailable()']}]
+        data['events'][1]['pages'][0]['list']=[
+            {'code':355,'indent':0,'parameters':['$gameVariables.setValue(1, 42);']},
+            {'code':123,'indent':0,'parameters':['A',0]},
+            {'code':0,'indent':0,'parameters':[]},
+        ]
+        data['events'][1]['pages'].append({
+            'conditions':{'actorId':1,'actorValid':False,'itemId':1,'itemValid':False,
+                          'selfSwitchCh':'A','selfSwitchValid':True,'switch1Id':1,'switch1Valid':False,
+                          'switch2Id':1,'switch2Valid':False,'variableId':1,'variableValid':False,'variableValue':0},
+            'directionFix':False,'image':{'characterIndex':0,'characterName':'','direction':2,'pattern':0,'tileId':0},
+            'list':[{'code':0,'indent':0,'parameters':[]}],
+            'moveFrequency':3,'moveRoute':{'list':[{'code':0,'parameters':[]}],'repeat':True,'skippable':False,'wait':False},
+            'moveSpeed':3,'moveType':0,'priorityType':0,'stepAnime':False,'through':False,'trigger':0,'walkAnime':True,
+        })
         path.write_text(json.dumps(data))
-        self.assertEqual(self.render().returncode,2)
-        self.assertIn('Unsupported event command 355',self.log())
+        self.assertEqual(self.render().returncode,0,self.log())
 
     def test_direct_project_does_not_change_source_files(self):
         def snapshot():

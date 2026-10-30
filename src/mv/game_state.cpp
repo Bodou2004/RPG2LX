@@ -27,6 +27,24 @@ int integer(const JsonValue& j,int low,int high) {
 }
 }
 
+JsRuntime::BattlerContext GameSession::actor_context(const PartyActor& a) const {
+    JsRuntime::BattlerContext ctx;
+    ctx.id = a.id;
+    ctx.name = a.name;
+    ctx.level = a.level;
+    ctx.hp = a.hp;
+    ctx.mhp = a.params.empty() ? 100 : a.params[0];
+    ctx.mp = a.mp;
+    ctx.mmp = a.params.size() > 1 ? a.params[1] : 50;
+    ctx.atk = a.params.size() > 2 ? a.params[2] : 10;
+    ctx.def = a.params.size() > 3 ? a.params[3] : 10;
+    ctx.mat = a.params.size() > 4 ? a.params[4] : 10;
+    ctx.mdf = a.params.size() > 5 ? a.params[5] : 10;
+    ctx.agi = a.params.size() > 6 ? a.params[6] : 10;
+    ctx.luk = a.params.size() > 7 ? a.params[7] : 10;
+    return ctx;
+}
+
 std::string GameSession::term(const std::string& group,int index,const std::string& fallback) const {
     return at(get(get(system_,"terms"),group),index).get_string(fallback);
 }
@@ -216,24 +234,48 @@ bool GameSession::use_item(int id,std::size_t target) {
 }
 bool GameSession::apply_effects(const JsonValue& item,std::size_t target) {
     const int scope=get(item,"scope").get_int();
-    // Damage formulas are JavaScript; reject them rather than applying a guessed effect.
-    if(get(get(item,"damage"),"type").get_int()!=0)return false;
+    const auto& damage=get(item,"damage");
+    const int damage_type=get(damage,"type").get_int();
+    const std::string formula=get(damage,"formula").get_string();
     const auto& effects=get(item,"effects");
-    for(const auto& e:effects.arr_val) {
-        const int code=get(e,"code").get_int();
-        if(code!=11&&code!=12&&!(code==22&&get(e,"dataId").get_int()==1))return false;
-    }
+
     bool applied=false;
     for(std::size_t i=0;i<actors_.size();++i) {
         if(scope!=8&&scope!=10&&i!=target)continue;
         auto& a=actors_[i];const bool dead=a.hp==0;
         if(dead!=(scope==9||scope==10))continue;
+
+        // Evaluate and apply damage formula via QuickJS
+        if(damage_type!=0&&!formula.empty()) {
+            const auto user_ctx=(actor_selection_<actors_.size())?actor_context(actors_[actor_selection_]):actor_context(a);
+            const auto target_ctx=actor_context(a);
+            double val=const_cast<JsRuntime&>(js_runtime_).eval_formula(formula,user_ctx,target_ctx,
+                [this](int id){return variable_value(id);},0.0);
+            int dmg=static_cast<int>(std::round(val));
+            if(damage_type==1) {
+                int next_hp=std::max(0,a.hp-dmg);
+                if(next_hp!=a.hp){a.hp=next_hp;applied=true;}
+            } else if(damage_type==2) {
+                int next_mp=std::max(0,a.mp-dmg);
+                if(next_mp!=a.mp){a.mp=next_mp;applied=true;}
+            } else if(damage_type==3) {
+                int next_hp=std::clamp(a.hp+dmg,0,a.params[0]);
+                if(next_hp!=a.hp){a.hp=next_hp;applied=true;}
+            } else if(damage_type==4) {
+                int next_mp=std::clamp(a.mp+dmg,0,a.params[1]);
+                if(next_mp!=a.mp){a.mp=next_mp;applied=true;}
+            }
+        }
+
+        // Apply standard effects (recovery, revive)
         for(const auto& e:effects.arr_val) {
             const int code=get(e,"code").get_int();
-            if(code==22){if(a.hp==0){a.hp=1;applied=true;}continue;}
-            const int max=code==11?a.params[0]:a.params[1];int& stat=code==11?a.hp:a.mp;
-            const int amount=static_cast<int>(std::floor(max*get(e,"value1").get_double()+get(e,"value2").get_double()));
-            const int value=std::clamp(stat+amount,0,max);applied=applied||value!=stat;stat=value;
+            if(code==22&&get(e,"dataId").get_int()==1){if(a.hp==0){a.hp=1;applied=true;}continue;}
+            if(code==11||code==12) {
+                const int max=code==11?a.params[0]:a.params[1];int& stat=code==11?a.hp:a.mp;
+                const int amount=static_cast<int>(std::floor(max*get(e,"value1").get_double()+get(e,"value2").get_double()));
+                const int value=std::clamp(stat+amount,0,max);applied=applied||value!=stat;stat=value;
+            }
         }
     }
     return applied;
@@ -313,7 +355,7 @@ bool GameSession::load(int slot,std::string& error) {
         next.menu_enabled_=get(j,"menuEnabled").get_bool(true);next.save_enabled_=get(j,"saveEnabled").get_bool(true);
         if(!next.load_map(integer(get(j,"map"),1,999999),integer(get(j,"x"),0,10000),integer(get(j,"y"),0,10000),error))return false;
         next.direction_=integer(get(j,"direction"),2,8);if(next.direction_%2)throw std::runtime_error("Invalid saved direction");next.reset_followers();
-        *this=std::move(next);return true;
+        *this=std::move(next);bind_js_hooks();return true;
     }catch(const std::exception& e){error=e.what();return false;}
 }
 } // namespace rpg2lx
