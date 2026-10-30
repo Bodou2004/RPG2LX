@@ -47,7 +47,7 @@ No se lanza gptokeyb para el menú: duplicaría las entradas que SDL ya recibe. 
 
 ## Metadatos
 
-Plantilla port.json v4 con arquitectura aarch64, experimental activo y ready-to-run falso. La descripción advierte que el menú y la inspección existen, pero la ejecución de juegos aún no está implementada.
+Plantilla port.json v4 con arquitectura aarch64, experimental activo y ready-to-run falso. La descripción advierte del modo nativo parcial: mapa, movimiento, mensajes y transferencias, pero sin batalla, audio, guardado ni plugins. No es todavía compatibilidad completa de juegos.
 
 No se establece reqs=opengl: el generador oficial define ese requisito como OpenGL de escritorio, no OpenGL ES. Este menú usa SDL2 y permite renderer software. Los futuros backends GLES deberán validarse contra el firmware y no confundirse con ese requisito.
 

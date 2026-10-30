@@ -3,6 +3,7 @@
 #ifdef RPG2LX_WITH_SDL
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include "rpg2lx/map_view.hpp"
 #include <algorithm>
 #include <memory>
 #include <vector>
@@ -106,8 +107,9 @@ void draw(SDL_Renderer* r, const rpg2lx::LauncherModel& model) {
         rect(r, 28, 176, 584, 90, panel);
         text(r, selected->detected ? "ESTRUCTURA MV DETECTADA" : "REVISAR CARPETA", 44, 193,
              selected->detected ? accent : warning, 2, 34);
-        text(r, "Jugar: disponible cuando el motor este listo", 44, 235, muted, 1, 68);
+        text(r, "Modo nativo: mapas y eventos basicos", 44, 235, muted, 1, 68);
         text(r, "A / Enter: comprobar datos", 28, 293, accent, 2, 36);
+        text(r, "X / P: iniciar modo nativo", 28, 318, accent, 1, 70);
         const auto message = model.message().empty() ?
             (selected->detected ? "Partidas y configuracion separadas de los archivos del juego." :
              "No se encontro una estructura MV completa en esta carpeta.") : model.message();
@@ -118,7 +120,7 @@ void draw(SDL_Renderer* r, const rpg2lx::LauncherModel& model) {
 } // namespace
 
 namespace rpg2lx {
-int run_launcher(GameLibrary& library, int smoke_frames, const std::string& screenshot) {
+int run_launcher(GameLibrary& library, int smoke_frames, const std::string& screenshot, bool start_first) {
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "SDL initialization: " << SDL_GetError() << '\n'; return 3;
@@ -140,6 +142,13 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     SDL_RenderSetLogicalSize(renderer.get(), width, height);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
     LauncherModel model(library);
+    std::unique_ptr<MapView> map_view;
+    std::string map_error;
+    std::string reported_session_error;
+    if (start_first) {
+        model.act(MenuAction::Confirm); model.act(MenuAction::Play);
+        if (!model.session()) { std::cerr << model.message() << '\n'; return 2; }
+    }
     using Controller = std::unique_ptr<SDL_GameController, decltype(&SDL_GameControllerClose)>;
     std::vector<Controller> controllers;
     auto open_controller = [&](int index) {
@@ -153,7 +162,9 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     bool dirty = true;
     int frames = 0;
     Uint32 last_axis = 0;
+    Uint32 previous_time = SDL_GetTicks();
     while (running && !model.quit()) {
+        const Uint32 frame_started = SDL_GetTicks();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             dirty = true;
@@ -166,32 +177,83 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                 if (event.key.repeat && event.key.keysym.sym != SDLK_UP && event.key.keysym.sym != SDLK_DOWN)
                     continue;
                 switch (event.key.keysym.sym) {
-                    case SDLK_UP: model.act(MenuAction::Up); break;
-                    case SDLK_DOWN: model.act(MenuAction::Down); break;
+                    case SDLK_UP: if (!model.session()) model.act(MenuAction::Up); break;
+                    case SDLK_DOWN: if (!model.session()) model.act(MenuAction::Down); break;
                     case SDLK_RETURN: case SDLK_z: model.act(MenuAction::Confirm); break;
                     case SDLK_ESCAPE: case SDLK_x: model.act(MenuAction::Back); break;
                     case SDLK_r: model.act(MenuAction::Refresh); break;
+                    case SDLK_p: model.act(MenuAction::Play); break;
                     default: break;
                 }
             } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
                 switch (event.cbutton.button) {
-                    case SDL_CONTROLLER_BUTTON_DPAD_UP: model.act(MenuAction::Up); break;
-                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: model.act(MenuAction::Down); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_UP: if (!model.session()) model.act(MenuAction::Up); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: if (!model.session()) model.act(MenuAction::Down); break;
                     case SDL_CONTROLLER_BUTTON_A: model.act(MenuAction::Confirm); break;
                     case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_BACK: model.act(MenuAction::Back); break;
                     case SDL_CONTROLLER_BUTTON_Y: model.act(MenuAction::Refresh); break;
+                    case SDL_CONTROLLER_BUTTON_X: model.act(MenuAction::Play); break;
                     default: break;
                 }
             }
         }
         for (const auto& controller : controllers) {
             const auto axis = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTY);
-            if (SDL_GetTicks() - last_axis > 180 && (axis < -16000 || axis > 16000)) {
+            if (!model.session() && SDL_GetTicks() - last_axis > 180 && (axis < -16000 || axis > 16000)) {
                 model.act(axis < 0 ? MenuAction::Up : MenuAction::Down); last_axis = SDL_GetTicks();
                 dirty = true;
             }
         }
-        if (dirty || smoke_frames > 0) draw(renderer.get(), model);
+        const Uint32 now = SDL_GetTicks();
+        if (auto* session = model.session()) {
+            if (!map_view) map_view = std::make_unique<MapView>(renderer.get());
+            session->update((now-previous_time)/1000.0);
+            const auto* keys = SDL_GetKeyboardState(nullptr);
+            int direction = keys[SDL_SCANCODE_DOWN] ? 2 : keys[SDL_SCANCODE_LEFT] ? 4 :
+                            keys[SDL_SCANCODE_RIGHT] ? 6 : keys[SDL_SCANCODE_UP] ? 8 : 0;
+            for (const auto& controller : controllers) {
+                const int ax = SDL_GameControllerGetAxis(controller.get(),SDL_CONTROLLER_AXIS_LEFTX);
+                const int ay = SDL_GameControllerGetAxis(controller.get(),SDL_CONTROLLER_AXIS_LEFTY);
+                if (SDL_GameControllerGetButton(controller.get(),SDL_CONTROLLER_BUTTON_DPAD_DOWN) || ay > 16000) direction=2;
+                else if (SDL_GameControllerGetButton(controller.get(),SDL_CONTROLLER_BUTTON_DPAD_UP) || ay < -16000) direction=8;
+                else if (SDL_GameControllerGetButton(controller.get(),SDL_CONTROLLER_BUTTON_DPAD_LEFT) || ax < -16000) direction=4;
+                else if (SDL_GameControllerGetButton(controller.get(),SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || ax > 16000) direction=6;
+            }
+            if (direction && map_error.empty()) session->move(direction);
+            dirty = true;
+            if (map_error.empty() && !map_view->render(*session,now,map_error)) std::cerr << map_error << '\n';
+            if (!map_error.empty() || !session->error().empty()) {
+                if (!session->error().empty() && session->error()!=reported_session_error) {
+                    std::cerr << session->error() << '\n'; reported_session_error=session->error();
+                }
+                rect(renderer.get(),0,0,640,480,background);
+                rect(renderer.get(),12,120,616,240,panel);
+                text(renderer.get(),"NO SE PUEDE CONTINUAR",28,140,warning,2,36);
+                wrapped(renderer.get(),map_error.empty()?session->error():map_error,28,185,ink,36,5);
+                text(renderer.get(),"B / Esc: volver a la biblioteca",28,335,accent,1,72);
+            } else if (!session->message().empty()) {
+                rect(renderer.get(),12,306,616,160,panel);
+                // Message strings remain data; escape codes are not evaluated.
+                std::size_t begin=0; int y=318;
+                while (begin<session->message().size() && y<420) {
+                    auto end=session->message().find('\n',begin);
+                    const auto line=session->message().substr(begin,end==std::string::npos?end:end-begin);
+                    text(renderer.get(),line,28,y,ink,2,36); y+=32;
+                    if(end==std::string::npos) break;
+                    begin=end+1;
+                }
+                text(renderer.get(),"A / Enter: continuar",28,445,accent,1,72);
+            } else {
+                rect(renderer.get(),0,0,640,20,background);
+                text(renderer.get(),"NATIVO EXPERIMENTAL | A: hablar | B: biblioteca",8,6,accent,1,78);
+            }
+        } else {
+            map_view.reset();
+            reported_session_error.clear();
+            map_error.clear();
+            if (dirty || smoke_frames > 0) draw(renderer.get(), model);
+        }
+        previous_time=now;
         if (smoke_frames > 0 && ++frames >= smoke_frames) {
             if (!screenshot.empty()) {
                 auto* surface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_ARGB8888);
@@ -205,14 +267,16 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         }
         if (dirty || smoke_frames > 0) SDL_RenderPresent(renderer.get());
         dirty = false;
-        SDL_Delay(16);
+        const Uint32 elapsed = SDL_GetTicks()-frame_started;
+        if (elapsed < 16) SDL_Delay(16-elapsed);
     }
+    if (start_first && (!map_error.empty() || (model.session() && !model.session()->error().empty()))) return 2;
     return 0;
 }
 } // namespace rpg2lx
 #else
 namespace rpg2lx {
-int run_launcher(GameLibrary&, int, const std::string&) {
+int run_launcher(GameLibrary&, int, const std::string&, bool) {
     std::cerr << "This diagnostic build has no graphical menu. Build with RPG2LX_WITH_SDL=ON.\n";
     return 3;
 }

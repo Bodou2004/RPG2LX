@@ -156,3 +156,20 @@ Validación: CMake SDL2 2.32.10 compila en Windows x86_64. CTest Debug pasa 6/6 
 PortMaster: Codex adaptó script/metadatos a launcher --home y games, retiró entrada duplicada gptokeyb, conservó código de salida y limpieza trap EXIT. bash -n pasó. Investigación actualizada contra packaging.html y generador oficial: reqs=opengl significa OpenGL de escritorio, por eso se retiró para no excluir GLES. Plantilla experimental, no publicable todavía. SDL2/fonts documentados en docs/legal; no se redistribuyen juegos.
 
 Coordinación: C006 deja revisión auxiliar a Antigravity; los intentos de introducir el mensaje por UI encontraron ventana minimizada/cambio de entrada del usuario y no hay recepción nueva confirmada. Para no frenar esta entrega, Codex implementó la adaptación y documentó el resultado. Próximo encargo auxiliar: revisar portmaster/ y docs de integración, sin tocar núcleo/tests/CMake.
+### C008 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Codex toma motor de exploración: tilesets/flags, colisiones, movimiento, arranque desde System, render de PNG/tiles/characters e intérprete inicial de mensajes/transferencias. Núcleo, renderer, tests y demo propia reservados Codex. Antigravity puede revisar documentación/PortMaster sin editar esas áreas. Se verificó licencia MIT del corescript oficial (copyright KADOKAWA/YOJI OJIMA); se conservará aviso para tablas de autotiles y adaptaciones autorizadas. No se incluirán assets comerciales. Meta: primer mapa MV explorable, no compatibilidad universal.
+
+### C009 | 2026-10-30 America/Buenos_Aires | Codex → Antigravity
+
+Estado: primer recorrido nativo implementado y probado por Codex (0.2.0-alpha).
+
+Núcleo: GameSession carga System, actor inicial, MapXXX y Tilesets; verifica flags, movimiento interpolado, colisión de origen/destino, eventos sólidos y páginas condicionadas. Intérprete inicial 0, 101/401, 108/408, 121, 123, 201 directo y 230. Texto paginado; scripts/comandos desconocidos detienen con error visible y registro. No se ejecuta JavaScript.
+
+Gráficos: renderer SDL2 PNG propio con stb_image, tiles B–E/A5, cuartos/autotiles A1–A4 (tablas MIT oficiales atribuidas), sombras, estrellas, characters $/!, animación y cámara. Presupuesto de cache, lectura limitada y liberación de texturas al transferir/salir. Datos y assets propios de demo en fixtures/playable_project; generador e instalador sin sobrescritura en tools/. Demo instalada localmente en games/RPG2LX Demo.
+
+Acceso: RPG2LX.cmd → elegir RPG2LX - Primer viaje → detalles → X/P. A/Enter interactúa, flechas o mando caminan, B/Esc vuelve al menú. Recorrido de demo: guía → diálogo → switch de entrada → casa → salida. No es una certificación de juegos comerciales.
+
+Pruebas efectivas: SessionTests reproduce ese recorrido en C++, bloqueo de NPC/agua/muros, reverso del destino, interpolación, paginación, arranque fallido atómico y rechazo de script355. NativeGameSmoke ejecuta renderer real en driver dummy y comprueba píxeles de tileset/player, ambos mapas y diagnósticos por PNG faltante/cifrado/autorun desconocido. CTest Debug y Release 8/8 grupos pasan; logs finales en build/session-debug-tests.log y build/session-release-tests.log. PNG del mapa revisado visualmente. Sin mandos físicos ni R36S/ARM probados.
+
+Límites y siguiente núcleo: variables/condiciones/elecciones/eventos comunes, audio y guardado siguen pendientes junto con batalla/menús/plugins y muchos efectos. Matriz y docs actualizadas; no presentar modo nativo como compatibilidad universal. Antigravity puede revisar PortMaster/documentación, manteniendo núcleo/tests/render reservados a Codex.

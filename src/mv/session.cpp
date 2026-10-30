@@ -1,0 +1,356 @@
+#include "rpg2lx/session.hpp"
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <stdexcept>
+
+namespace fs = std::filesystem;
+namespace rpg2lx {
+namespace {
+JsonValue read_json(const fs::path& path) {
+    std::error_code ec;
+    const auto size = fs::file_size(path, ec);
+    if (ec || size > 32 * 1024 * 1024) throw std::runtime_error("Cannot read JSON or file too large: " + path.u8string());
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("Cannot open: " + path.u8string());
+    std::string data;
+    char buffer[8192];
+    while (input.read(buffer, sizeof buffer) || input.gcount()) {
+        if (data.size() + static_cast<std::size_t>(input.gcount()) > 32 * 1024 * 1024)
+            throw std::runtime_error("JSON exceeds input budget");
+        data.append(buffer, static_cast<std::size_t>(input.gcount()));
+    }
+    if (!input.eof()) throw std::runtime_error("Read error: " + path.u8string());
+    std::string error;
+    auto json = JsonParser::parse(data, error);
+    if (!error.empty()) throw std::runtime_error(path.u8string() + ": " + error);
+    return json;
+}
+const JsonValue& field(const JsonValue& object, const std::string& key) {
+    const auto* value = object.find(key);
+    if (!value) throw std::runtime_error("Missing field: " + key);
+    return *value;
+}
+int number(const JsonValue& value, int low, int high, const std::string& label) {
+    const int n = value.get_int(low - 1);
+    if (n < low || n > high) throw std::runtime_error(label + ": invalid integer");
+    return n;
+}
+int member(const JsonValue& object, const std::string& name, int fallback) {
+    const auto* value = object.find(name);
+    return value ? value->get_int(fallback) : fallback;
+}
+bool enabled(const JsonValue& object, const std::string& name) {
+    const auto* value = object.find(name); return value && value->get_bool();
+}
+bool valid_direction(int d) { return d == 2 || d == 4 || d == 6 || d == 8; }
+int dx(int d) { return d == 6 ? 1 : d == 4 ? -1 : 0; }
+int dy(int d) { return d == 2 ? 1 : d == 8 ? -1 : 0; }
+int wrap(int n, int length) { return (n % length + length) % length; }
+std::string self_key(int map, int event, const std::string& ch) {
+    return std::to_string(map) + ":" + std::to_string(event) + ":" + ch;
+}
+int parameter(const EventCommand& command, std::size_t i, int low, int high) {
+    if (i >= command.parameters.size()) throw std::runtime_error("Missing event parameter");
+    return number(command.parameters[i], low, high, "Event parameter");
+}
+} // namespace
+
+std::uint32_t TilesetData::flag(int tile) const {
+    if (tile < 0 || static_cast<std::size_t>(tile) >= flags.size())
+        throw std::runtime_error("Tileset has no flags for tile " + std::to_string(tile));
+    return flags[static_cast<std::size_t>(tile)];
+}
+
+bool GameSession::boot(const fs::path& project, std::string& error) {
+    error.clear();
+    try {
+        GameSession next;
+        next.project_ = fs::canonical(project);
+        const auto system = read_json(next.project_ / "data/System.json");
+        if (!system.is_object()) throw std::runtime_error("System.json must be object");
+        if (enabled(system, "hasEncryptedImages")) throw std::runtime_error("Encrypted images are not supported by this native build");
+        const int map = number(field(system, "startMapId"), 1, 999999, "startMapId");
+        const int x = number(field(system, "startX"), 0, 10000, "startX");
+        const int y = number(field(system, "startY"), 0, 10000, "startY");
+        if (const auto* party = system.find("partyMembers")) {
+            if (!party->is_array()) throw std::runtime_error("partyMembers must be array");
+            for (const auto& id : party->arr_val) next.party_.push_back(number(id, 1, 999999, "party actor"));
+        }
+        if (!next.party_.empty()) {
+            const auto actors = read_json(next.project_ / "data/Actors.json");
+            const auto id = static_cast<std::size_t>(next.party_.front());
+            if (!actors.is_array() || id >= actors.arr_val.size()) throw std::runtime_error("Starting actor not found");
+            const auto& actor = actors.arr_val[id];
+            const auto& name = field(actor, "characterName");
+            if (!name.is_string()) throw std::runtime_error("Actor characterName must be string");
+            next.player_image_.name = name.str_val;
+            next.player_image_.index = number(field(actor, "characterIndex"), 0, 7, "characterIndex");
+        }
+        if (!next.load_map(map, x, y, error)) return false;
+        next.warnings_.push_back("Modo nativo experimental: plugins JavaScript, batalla y audio pendientes.");
+        *this = std::move(next);
+        check_autorun();
+        return true;
+    } catch (const std::exception& e) { error = e.what(); return false; }
+}
+
+bool GameSession::load_map(int id, int x, int y, std::string& error) {
+    try {
+        std::ostringstream filename; filename << "Map" << std::setw(3) << std::setfill('0') << id << ".json";
+        auto result = MapLoader::load(project_ / "data" / filename.str());
+        if (!result) throw std::runtime_error(result.error);
+        auto& map = *result.map;
+        if (x < 0 || y < 0 || x >= map.width || y >= map.height) throw std::runtime_error("Player position is outside the map");
+        const auto database = read_json(project_ / "data/Tilesets.json");
+        if (!database.is_array() || static_cast<std::size_t>(map.tileset_id) >= database.arr_val.size())
+            throw std::runtime_error("Tileset not found in Tilesets.json");
+        const auto& source = database.arr_val[map.tileset_id];
+        TilesetData tileset;
+        const auto& images = field(source, "tilesetNames");
+        const auto& flags = field(source, "flags");
+        if (!images.is_array() || images.arr_val.size() != 9 || !flags.is_array() || flags.arr_val.empty() || flags.arr_val.size() > 8192)
+            throw std::runtime_error("Invalid tileset image list or flags");
+        for (const auto& image : images.arr_val) {
+            if (!image.is_string()) throw std::runtime_error("Tileset image name must be string");
+            tileset.images.push_back(image.str_val);
+        }
+        for (const auto& flag : flags.arr_val) tileset.flags.push_back(static_cast<unsigned>(number(flag, 0, 0x1fffff, "tile flag")));
+        for (int layer = 0; layer < 4; ++layer)
+            for (int yy = 0; yy < map.height; ++yy)
+                for (int xx = 0; xx < map.width; ++xx) (void)tileset.flag(map.cell(xx, yy, layer));
+        for (const auto& event : map.events)
+            for (const auto& page : event.pages) {
+                const auto image = event_image(page);
+                if (image.tile_id > 0) (void)tileset.flag(image.tile_id);
+            }
+        map_ = std::move(map); tileset_ = std::move(tileset); map_id_ = id;
+        x_ = x; y_ = y; from_x_ = target_x_ = x; from_y_ = target_y_ = y; progress_ = 1;
+        autorun_pending_ = true;
+        return true;
+    } catch (const std::exception& e) { error = e.what(); return false; }
+}
+
+bool GameSession::switch_value(int id) const {
+    const auto found = switches_.find(id); return found != switches_.end() && found->second;
+}
+
+bool GameSession::conditions_met(const JsonValue& c, int event_id) const {
+    for (const auto* prefix : {"switch1", "switch2"})
+        if (enabled(c, std::string(prefix)+"Valid") && !switch_value(member(c, std::string(prefix)+"Id", 0))) return false;
+    if (enabled(c, "variableValid")) {
+        const auto found = variables_.find(member(c, "variableId", 0));
+        if ((found == variables_.end() ? 0 : found->second) < member(c, "variableValue", 0)) return false;
+    }
+    if (enabled(c, "selfSwitchValid")) {
+        const auto* ch = c.find("selfSwitchCh");
+        if (!ch || !ch->is_string() || !self_switches_.count(self_key(map_id_, event_id, ch->str_val))) return false;
+    }
+    if (enabled(c, "itemValid")) return false; // Initial inventory is empty; inventory commands remain unsupported.
+    if (enabled(c, "actorValid") && std::find(party_.begin(), party_.end(), member(c, "actorId", 0)) == party_.end()) return false;
+    return true;
+}
+
+const EventPage* GameSession::active_page(const MapEvent& event) const {
+    for (auto it = event.pages.rbegin(); it != event.pages.rend(); ++it) {
+        const auto* c = it->settings.find("conditions");
+        if (!c || conditions_met(*c, event.id)) return &*it;
+    }
+    return nullptr;
+}
+
+CharacterImage GameSession::event_image(const EventPage& page) const {
+    CharacterImage image;
+    if (const auto* value = page.settings.find("image")) {
+        if (const auto* name = value->find("characterName")) image.name = name->get_string();
+        image.index = member(*value, "characterIndex", 0);
+        image.direction = member(*value, "direction", 2);
+        image.pattern = member(*value, "pattern", 1);
+        image.tile_id = member(*value, "tileId", 0);
+    }
+    return image;
+}
+
+bool GameSession::tile_passage(int x, int y, unsigned bit) const {
+    auto decision = [&](int tile) {
+        const auto flags = tileset_.flag(tile);
+        return (flags & 0x10) ? -1 : (flags & bit) ? 0 : 1;
+    };
+    for (const auto& event : map_.events) {
+        const auto* page = active_page(event);
+        if (!page || event.x != x || event.y != y || enabled(page->settings, "through")) continue;
+        const auto image = event_image(*page);
+        if (image.tile_id > 0 && member(page->settings, "priorityType", 1) == 0) {
+            const auto result = decision(image.tile_id); if (result != -1) return result == 1;
+        }
+    }
+    for (int layer = 3; layer >= 0; --layer) {
+        const auto result = decision(map_.cell(x, y, layer)); if (result != -1) return result == 1;
+    }
+    return false;
+}
+
+bool GameSession::passable(int x, int y, int direction) const {
+    if (!valid_direction(direction) || map_.width <= 0 || map_.height <= 0 ||
+        x < 0 || y < 0 || x >= map_.width || y >= map_.height) return false;
+    int xx = x + dx(direction), yy = y + dy(direction);
+    if (map_.loops_x()) xx = wrap(xx, map_.width);
+    if (map_.loops_y()) yy = wrap(yy, map_.height);
+    if (xx < 0 || yy < 0 || xx >= map_.width || yy >= map_.height) return false;
+    const unsigned bit = 1u << (direction / 2 - 1);
+    const unsigned reverse = 1u << ((10-direction) / 2 - 1);
+    if (!tile_passage(x,y,bit) || !tile_passage(xx,yy,reverse)) return false;
+    for (const auto& event : map_.events) {
+        const auto* page = active_page(event);
+        if (page && event.x == xx && event.y == yy && !enabled(page->settings, "through") &&
+            member(page->settings, "priorityType", 1) == 1) return false;
+    }
+    return true;
+}
+
+bool GameSession::move(int direction) {
+    if (!valid_direction(direction) || moving() || !message_.empty() || !error_.empty() || !commands_.empty()) return false;
+    direction_ = direction;
+    if (!passable(x_,y_,direction)) {
+        trigger_at(x_+dx(direction), y_+dy(direction), 1, true);
+        trigger_at(x_+dx(direction), y_+dy(direction), 2, true);
+        return false;
+    }
+    from_x_ = x_; from_y_ = y_; target_x_ = x_ + dx(direction); target_y_ = y_ + dy(direction);
+    x_ += dx(direction); y_ += dy(direction);
+    if (map_.loops_x()) x_ = wrap(x_, map_.width);
+    if (map_.loops_y()) y_ = wrap(y_, map_.height);
+    progress_ = 0;
+    return true;
+}
+
+void GameSession::trigger_at(int x, int y, int trigger, bool normal) {
+    if (!commands_.empty() || !error_.empty()) return;
+    if (map_.loops_x()) x = wrap(x, map_.width);
+    if (map_.loops_y()) y = wrap(y, map_.height);
+    for (const auto& event : map_.events) {
+        const auto* page = active_page(event);
+        if (page && event.x == x && event.y == y && page->trigger == trigger &&
+            (member(page->settings,"priorityType",1) == 1) == normal) {
+            start_event(event, *page); return;
+        }
+    }
+}
+
+void GameSession::start_event(const MapEvent& event, const EventPage& page) {
+    event_id_ = event.id; commands_ = page.commands; command_index_ = 0; execute();
+}
+
+void GameSession::check_autorun() {
+    if (!autorun_pending_ || !commands_.empty() || !message_.empty() || !error_.empty()) return;
+    autorun_pending_ = false;
+    for (const auto& event : map_.events) {
+        const auto* page = active_page(event);
+        if (page && page->trigger == 3) { start_event(event, *page); return; }
+    }
+}
+
+void GameSession::confirm() {
+    if (!error_.empty() || moving()) return;
+    if (!message_.empty()) {
+        if (!message_queue_.empty()) { message_ = std::move(message_queue_.front()); message_queue_.pop_front(); }
+        else { message_.clear(); execute(); }
+        return;
+    }
+    trigger_at(x_, y_, 0, false);
+    if (commands_.empty() && message_.empty()) trigger_at(x_+dx(direction_), y_+dy(direction_), 0, true);
+}
+
+void GameSession::execute() {
+    try {
+        unsigned budget = 1000;
+        while (command_index_ < commands_.size() && budget--) {
+            const auto command = commands_[command_index_++];
+            switch (command.code) {
+                case 0: break;
+                case 108: case 408: break; // Comments.
+                case 101: {
+                    message_.clear();
+                    message_queue_.clear();
+                    std::vector<std::string> lines;
+                    while (command_index_ < commands_.size() && commands_[command_index_].code == 401) {
+                        const auto& line = commands_[command_index_++];
+                        if (line.parameters.empty() || !line.parameters[0].is_string()) throw std::runtime_error("Invalid message text");
+                        std::string visible;
+                        unsigned columns=0;
+                        for (const char ch : line.parameters[0].str_val) {
+                            const bool lead = (static_cast<unsigned char>(ch)&0xC0) != 0x80;
+                            if (ch=='\n' || (lead && columns==36)) {
+                                lines.push_back(std::move(visible)); visible.clear(); columns=0;
+                            }
+                            if (ch=='\n') continue;
+                            visible += ch;
+                            if (lead) ++columns;
+                        }
+                        lines.push_back(std::move(visible));
+                    }
+                    for (std::size_t i=0;i<lines.size();i+=4) {
+                        std::string page;
+                        for (std::size_t j=i;j<std::min(i+4,lines.size());++j) {
+                            if (j!=i) page+='\n';
+                            page+=lines[j];
+                        }
+                        if (page.empty()) page="\n";
+                        message_queue_.push_back(std::move(page));
+                    }
+                    if (!message_queue_.empty()) { message_=std::move(message_queue_.front()); message_queue_.pop_front(); }
+                    if (!message_.empty()) return;
+                    break;
+                }
+                case 121: {
+                    const int first = parameter(command,0,1,999999), last = parameter(command,1,first,999999);
+                    if (last-first > 10000) throw std::runtime_error("Switch range exceeds budget");
+                    const bool on = parameter(command,2,0,1) == 0;
+                    for (int id = first; id <= last; ++id) switches_[id] = on;
+                    autorun_pending_ = true; break;
+                }
+                case 123: {
+                    if (command.parameters.empty() || !command.parameters[0].is_string()) throw std::runtime_error("Invalid self-switch key");
+                    const auto ch = command.parameters[0].str_val;
+                    if (ch != "A" && ch != "B" && ch != "C" && ch != "D") throw std::runtime_error("Invalid self-switch key");
+                    const auto key = self_key(map_id_,event_id_,ch);
+                    if (parameter(command,1,0,1) == 0) self_switches_.insert(key); else self_switches_.erase(key);
+                    autorun_pending_ = true; break;
+                }
+                case 201: {
+                    if (parameter(command,0,0,1) != 0) throw std::runtime_error("Variable-based transfer is not implemented");
+                    const int id = parameter(command,1,1,999999), x = parameter(command,2,0,10000), y = parameter(command,3,0,10000);
+                    const int direction = parameter(command,4,0,8);
+                    if (direction && !valid_direction(direction)) throw std::runtime_error("Invalid transfer direction");
+                    std::string error;
+                    if (!load_map(id,x,y,error)) throw std::runtime_error(error);
+                    if (direction) direction_ = direction;
+                    commands_.clear(); command_index_ = 0; return;
+                }
+                case 230: wait_ = parameter(command,0,0,36000) / 60.0; if (wait_ > 0) return; break;
+                default: throw std::runtime_error("Unsupported event command " + std::to_string(command.code) +
+                            " at map " + std::to_string(map_id_) + ", event " + std::to_string(event_id_));
+            }
+        }
+        if (command_index_ < commands_.size()) throw std::runtime_error("Event instruction budget exceeded");
+        commands_.clear(); command_index_ = 0; autorun_pending_ = true;
+    } catch (const std::exception& e) { error_ = e.what(); commands_.clear(); message_.clear(); message_queue_.clear(); }
+}
+
+void GameSession::update(double seconds) {
+    if (!std::isfinite(seconds)) return;
+    seconds = std::clamp(seconds, 0.0, 0.1);
+    if (moving()) {
+        progress_ = std::min(1.0, progress_ + seconds * 3.75);
+        if (!moving()) {
+            from_x_ = target_x_ = x_; from_y_ = target_y_ = y_;
+            trigger_at(x_,y_,1,false);
+            trigger_at(x_,y_,2,false);
+        }
+    }
+    if (wait_ > 0) { wait_ = std::max(0.0, wait_-seconds); if (wait_ == 0) execute(); }
+    check_autorun();
+}
+} // namespace rpg2lx

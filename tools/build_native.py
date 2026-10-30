@@ -26,12 +26,14 @@ def main():
     flags = ["-std=c++17", "-Wall", "-Wextra", "-Wpedantic", "-Wno-nullability-completeness",
              "-I", str(ROOT / "include")]
     flags += ["-O2", "-DNDEBUG"] if args.release else ["-O0", "-g"]
-    core = ["src/core/inspector.cpp", "src/mv/map.cpp", "src/launcher/library.cpp", "src/launcher/model.cpp"]
+    core = ["src/core/inspector.cpp", "src/mv/map.cpp", "src/mv/session.cpp", "src/mv/tile_layout.cpp",
+            "src/launcher/library.cpp", "src/launcher/model.cpp"]
     targets = {"rpg2lx": [*core, "src/cli/main.cpp", "src/launcher/frontend.cpp"],
                "test_inspector": [*core, "tests/test_inspector.cpp"],
                "test_json": ["tests/test_json.cpp"],
                "test_map": ["src/mv/map.cpp", "tests/test_map.cpp"],
-               "test_library": [*core, "tests/test_library.cpp"]}
+               "test_library": [*core, "tests/test_library.cpp"],
+               "test_session": [*core, "tests/test_session.cpp"]}
     for name, sources in targets.items():
         print(f"Building {name}", flush=True)
         with (out / f"{name}.log").open("w", encoding="utf-8") as log:
@@ -44,7 +46,8 @@ def main():
             return result.returncode
     for name, arguments in {"test_json": [], "test_map": [str(ROOT / "fixtures/valid_project/data/Map001.json")],
                             "test_inspector": [str(ROOT / "fixtures")],
-                            "test_library": [str(ROOT / "fixtures")]}.items():
+                            "test_library": [str(ROOT / "fixtures")],
+                            "test_session": [str(ROOT / "fixtures/playable_project")]}.items():
         subprocess.run([str(out / (name + suffix)), *arguments], cwd=out, check=True)
     binary = str(out / ("rpg2lx" + suffix))
     for arguments, expected in [(["--version"], 0), (["--help"], 0),

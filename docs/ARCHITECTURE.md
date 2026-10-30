@@ -1,3 +1,5 @@
+> Actualización 0.2.0-alpha: la sesión nativa y el renderer de mapas ya están implementados en src/mv/session.cpp, tile_layout.cpp y src/render/map_view.cpp. Ver NATIVE_EXPLORATION.md y MV_COMPATIBILITY.md para el alcance vigente. El resto de este documento conserva el diseño base inicial.
+
 # RPG2LX — Arquitectura Técnica
 
 Fecha: 2026-10-30

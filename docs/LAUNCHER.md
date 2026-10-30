@@ -29,13 +29,14 @@ El título viene de `System.json`; la identidad para partidas y configuración e
 - D-pad o stick izquierdo: elegir juego.
 - A / Enter / Z: ver detalles; dentro de detalles, comprobar los datos.
 - B / Escape / X: volver; desde la lista, salir.
+- X / P dentro de detalles: iniciar modo nativo experimental. En mapa, A/Enter/Z interactúa y B/Escape termina la sesión y vuelve a detalles.
 - Y / R: actualizar la biblioteca sin reiniciar. La selección se conserva por carpeta cuando sigue disponible.
 
 La interfaz se adapta mediante resolución lógica 640x480 y usa SDL2 GameController. El bitmap de texto incluye ASCII y Latin-1 (tildes y ñ); otros caracteres se muestran como `?` por ahora. No es todavía una interfaz de localización completa. La detección de estructura MV no distingue infaliblemente proyectos MZ ni prueba compatibilidad de plugins.
 
 ## Estado actual
 
-El menú es funcional: biblioteca vacía, lista paginada, detalles, comprobación de datos, directorios separados y salida. La acción Jugar está explícitamente deshabilitada: no existe aún ejecución del runtime. No se ejecuta JavaScript al explorar o comprobar proyectos.
+El menú es funcional: biblioteca vacía, lista paginada, detalles, comprobación de datos, directorios separados y salida. Desde detalles, X/P abre la primera ejecución nativa de mapas y eventos básicos. Ver NATIVE_EXPLORATION.md para la demo y sus límites. No se ejecuta JavaScript al explorar, comprobar ni iniciar esta sesión nativa; juegos que dependan de plugins pueden fallar o mostrar diferencias.
 
 ## Compilación y diagnóstico
 

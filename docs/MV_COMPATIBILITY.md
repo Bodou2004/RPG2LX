@@ -1,49 +1,29 @@
-# RPG2LX — Matriz de Compatibilidad RPG Maker MV
+# Compatibilidad MV de RPG2LX 0.2.0-alpha
 
-Fecha: 2026-10-30
-Estado: Hito 0/1 (Inspector de Proyectos)
+Estado 2026-10-30: primer motor nativo de exploración. Datos propios de prueba con dos mapas verificados; ningún juego comercial completo, plugin ni dispositivo R36S certificado.
 
-> [!IMPORTANT]
-> RPG2LX se encuentra actualmente en Fase 1 (Inspector y CLI). **No existe aún un runtime jugable ni renderer activo**. La presente matriz detalla el nivel de soporte del inspector estático frente a las especificaciones de RPG Maker MV v1.6.x.
+| Área | Estado real | Límite |
+|---|---|---|
+| Biblioteca games | Implementada | Detección estructural, no garantía de compatibilidad |
+| System.json | Arranque nativo | startMapId, startX/Y, partyMembers; no toda la configuración del juego |
+| Actors.json | Actor inicial | Character sheet del primer miembro; sin estadísticas/batalla |
+| Tilesets.json | Implementado | Nombres de sheets, flags, paso por dirección y estrella |
+| MapXXX.json | Carga y exploración | Dimensiones, planos, regiones, eventos, loops; ver NATIVE_EXPLORATION.md |
+| PNG y sprites | Renderer SDL2 | PNG no cifrado, tiles 48px, A1–A5/B–E y characters; faltan reglas especiales de mesa/overpass/parallax |
+| Movimiento | Básico | Cuatro direcciones, interpolación, colisión de origen/destino y eventos; sin vehículos/followers/dash |
+| Eventos | Parcial | Acción, toque, autorun; texto, switches, self-switches, transferencias directas y espera |
+| Páginas/condiciones | Parcial | Prioridad inversa, switches/self-switches, grupo y variables iniciales; sin inventario dinámico |
+| Diálogos | Parcial | UTF-8 y paginación; sin faces, escape codes, elecciones ni todas las opciones de ventana |
+| CommonEvents.json | Solo inspección | Aún no se ejecutan eventos comunes |
+| Plugins.js | Solo metadatos | El JavaScript no se ejecuta; no hay VM ni soporte de plugins |
+| Scripts MV/NW.js | No implementado | Los comandos script detienen la sesión con diagnóstico |
+| Batalla y menús MV | Pendiente | No disponibles |
+| Audio | Pendiente | BGM/BGS/ME/SE no reproducidos |
+| Guardado | Pendiente | Existen directorios por juego, no serialización de partidas |
+| Imágenes cifradas | No soportado | Rechazadas explícitamente |
+| Windows x86_64 | Pruebas nativas | Build Debug/Release; SDL dummy/render y recorrido en C++ |
+| R36S/Linux ARM | Pendiente | Sin build ARM, prueba de firmware, mandos físicos ni métricas de rendimiento |
 
----
+No se afirma compatibilidad universal. Un proyecto puede abrir un mapa y aun así fallar al activar un evento o depender de APIs no soportadas. Los comandos desconocidos se diagnostican; no se omiten para aparentar funcionamiento.
 
-## 1. Archivos de Datos de RPG Maker MV (`data/*.json`)
-
-| Archivo MV | Obligatorio en MV | Estado en Inspector RPG2LX | Notas |
-| :--- | :---: | :---: | :--- |
-| `data/System.json` | Sí | **Soportado (Parseo Estricto)** | Extrae `gameTitle`, `startMapId`, valida objeto raíz y sintaxis JSON. |
-| `data/MapInfos.json` | Sí | **Soportado (Parseo Estricto)** | Valida raíz tipo array y cuenta mapas definidos. |
-| `data/Actors.json` | Sí | **Soportado (Parseo Estricto)** | Valida raíz tipo array y cuenta actores en base de datos. |
-| `data/CommonEvents.json` | Sí | **Soportado (Parseo Estricto)** | Valida raíz tipo array y cuenta eventos comunes. |
-| `data/MapXXX.json` | Depende del mapa inicial | **Inspección de Existencia** | `valid_project` incluye `Map001.json` como fixture mínima. |
-| `data/Enemies.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Troops.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Items.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Skills.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Weapons.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Armors.json` | Opcional en intro | Pendiente Fase 2 | No evaluado en Fase 1. |
-| `data/Animations.json`| Opcional | Pendiente Fase 2 | No evaluado en Fase 1. |
-
----
-
-## 2. Configuración de Plataforma y Plugins
-
-| Componente | Estado | Detalle |
-| :--- | :---: | :--- |
-| `package.json` | **Soportado** | Extrae título alternativo y resolución de pantalla (`window.width`, `window.height`). |
-| `js/plugins.js` | **Soportado (Estático)** | Extrae nombre, estado activo (`status`), descripción y diccionario de parámetros (`parameters`). **Aislamiento:** No se evalúa código JS en el inspector. |
-| Scripts core (`rpg_core.js`, `rpg_managers.js`, etc.) | Pendiente VM | En RPG2LX, la lógica core se implementará nativamente en C++ para evitar el sobrecoste de NW.js. |
-
----
-
-## 3. Dispositivos y Plataformas Objetivo
-
-| Plataforma / Dispositivo | Arquitectura | Estado | Notas |
-| :--- | :--- | :---: | :--- |
-| **PC Host (Linux/Windows)** | x86_64 / x86 | En desarrollo (C++17) | Entorno primario para desarrollo y pruebas de integración. |
-| **R36S / RK3326 (ROCKNIX/AURKNIX)** | ARM64 (`aarch64`) | Pendiente toolchain/hardware | Target prioritario para PortMaster. |
-| **Otras consolas PortMaster** | ARM64 / `armhf` | Pendiente validación | Requiere paquete estandarizado y prueba física. |
-
-> [!WARNING]
-> No se promete compatibilidad universal con todos los juegos comerciales o plugins complejos de RPG Maker MV (por ejemplo, plugins que dependan de WebGL avanzado, llamadas arbitrarias a `require('nw.gui')` o manipulación pesada del DOM de Chromium). Cada plugin requerirá un shim nativo o aislamiento progresivo.
+La demo RPG2LX - Primer viaje valida el camino: arranque → movimiento → diálogo → switch → transferencia al segundo mapa → retorno. Ver NATIVE_EXPLORATION.md para detalles y controles.

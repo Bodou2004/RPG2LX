@@ -4,7 +4,7 @@ Runtime portable para proyectos RPG Maker MV, con Linux en consolas de bolsillo 
 
 ## Estado
 
-Menú gráfico SDL2, biblioteca `games`, inspector de proyectos y cargador de mapas implementados en C++17. Aún no hay ejecución de juegos ni validación en consola.
+Menú SDL2 y primer motor nativo de exploración MV: mapa inicial, tiles/sprites PNG, movimiento, colisiones, diálogos, switches y transferencias. Incluye una demo propia con dos mapas. La compatibilidad es parcial; todavía no hay batalla, audio, guardado, plugins ni validación en consola.
 La compatibilidad universal es una meta, no una capacidad demostrada.
 
 ## Documentación
@@ -15,10 +15,13 @@ La compatibilidad universal es una meta, no una capacidad demostrada.
 - `docs/BUILDING.md`: compilación y pruebas del código C++.
 - `docs/MAP_DATA.md`: módulo de mapas implementado por Codex.
 - `docs/LAUNCHER.md`: biblioteca games, menú y controles.
+- `docs/NATIVE_EXPLORATION.md`: cómo probar la demo y alcance real del motor nativo.
 
 ## Uso actual
 
 Copiá cada juego completo dentro de `games/Nombre del juego/`. RPG2LX crea `games`, `saves`, `config` y `logs` al arrancar. También reconoce proyectos dentro de `games/Nombre del juego/www/`.
+
+Para probar el primer recorrido, abrí `RPG2LX.cmd`, elegí **RPG2LX - Primer viaje** y pulsá **X / P** en sus detalles. Si la demo no está instalada, ejecutar `python tools/install_demo.py`.
 
 ```text
 rpg2lx --version

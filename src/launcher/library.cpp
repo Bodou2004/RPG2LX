@@ -77,7 +77,7 @@ GameEntry inspect_folder(const fs::path& folder) {
         }
     }
     game.detected = true;
-    game.diagnostic = "MV structure detected; game execution is not available yet";
+    game.diagnostic = "MV structure detected; native exploration is experimental";
     return game;
 }
 } // namespace

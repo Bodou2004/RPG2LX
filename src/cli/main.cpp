@@ -23,7 +23,7 @@ void print_help() {
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.1.0-alpha (Phase 0/1 milestone)\n";
+    std::cout << "rpg2lx version 0.2.0-alpha (Native map exploration)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 
@@ -34,10 +34,12 @@ static int rpg2lx_main(int argc, char* argv[]) {
         try {
             auto home = rpg2lx::executable_directory(argv[0]);
             int smoke_frames = 0;
+            bool start_first = false;
             std::string screenshot;
             for (int i = 2; i < argc; ++i) {
                 const std::string arg = argv[i];
                 if (arg == "--home" && i+1 < argc) home = std::filesystem::u8path(argv[++i]);
+                else if (command == "launcher" && arg == "--start-first") start_first = true;
                 else if (command == "launcher" && arg == "--smoke-frames" && i+1 < argc) {
                     const std::string number = argv[++i];
                     if (number.empty() || number.find_first_not_of("0123456789") != std::string::npos)
@@ -72,7 +74,7 @@ static int rpg2lx_main(int argc, char* argv[]) {
                 explicit Redirect(std::ostream& log) : out(std::cout.rdbuf(log.rdbuf())), err(std::cerr.rdbuf(log.rdbuf())) {}
                 ~Redirect() { std::cout.rdbuf(out); std::cerr.rdbuf(err); }
             } redirect(log);
-            return rpg2lx::run_launcher(library, smoke_frames, screenshot);
+            return rpg2lx::run_launcher(library, smoke_frames, screenshot, start_first);
         } catch (const std::exception& e) {
             std::cerr << "Launcher: " << e.what() << '\n'; return 1;
         }

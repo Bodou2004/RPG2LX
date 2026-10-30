@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rpg2lx VERSION 0.1.0 LANGUAGES CXX)
+project(rpg2lx VERSION 0.2.0 LANGUAGES CXX)
 option(RPG2LX_WITH_SDL "Build the graphical game library menu" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -19,6 +19,8 @@ include_directories(include)
 add_library(rpg2lx_core STATIC
     src/core/inspector.cpp
     src/mv/map.cpp
+    src/mv/session.cpp
+    src/mv/tile_layout.cpp
     src/launcher/library.cpp
     src/launcher/model.cpp
 )
@@ -42,6 +44,8 @@ if(RPG2LX_WITH_SDL)
     target_compile_definitions(rpg2lx PRIVATE RPG2LX_WITH_SDL)
     target_include_directories(rpg2lx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/font8x8")
     target_link_libraries(rpg2lx PRIVATE SDL2::SDL2)
+    target_sources(rpg2lx PRIVATE src/render/map_view.cpp)
+    target_include_directories(rpg2lx SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
     if(WIN32 AND TARGET SDL2::SDL2)
         add_custom_command(TARGET rpg2lx POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<TARGET_FILE:SDL2::SDL2>" "$<TARGET_FILE_DIR:rpg2lx>")
@@ -73,6 +77,9 @@ add_test(NAME MapTests COMMAND test_map "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/va
 add_executable(test_library tests/test_library.cpp)
 target_link_libraries(test_library PRIVATE rpg2lx_core)
 add_test(NAME LibraryTests COMMAND test_library "${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+add_executable(test_session tests/test_session.cpp)
+target_link_libraries(test_session PRIVATE rpg2lx_core)
+add_test(NAME SessionTests COMMAND test_session "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/playable_project")
 
 if(RPG2LX_WITH_SDL)
     add_test(NAME LauncherSmoke COMMAND rpg2lx launcher --home "${CMAKE_CURRENT_BINARY_DIR}/smoke-home"
@@ -84,4 +91,8 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME NativeCliTests COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli_native.py" "$<TARGET_FILE:rpg2lx>")
+    if(RPG2LX_WITH_SDL)
+        add_test(NAME NativeGameSmoke COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_game_smoke.py" "$<TARGET_FILE:rpg2lx>")
+    endif()
 endif()
