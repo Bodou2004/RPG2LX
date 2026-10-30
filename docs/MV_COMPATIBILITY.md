@@ -1,29 +1,26 @@
-# Compatibilidad MV de RPG2LX 0.2.0-alpha
+# Compatibilidad MV — RPG2LX 0.3.0-alpha
 
-Estado 2026-10-30: primer motor nativo de exploración. Datos propios de prueba con dos mapas verificados; ningún juego comercial completo, plugin ni dispositivo R36S certificado.
+Actualizado 2026-10-30. Motor nativo parcial: no ejecuta los scripts del motor MV ni plugins. Abrir un mapa no certifica un juego completo.
 
-| Área | Estado real | Límite |
+| Área | Implementado | Pendiente / alcance |
 |---|---|---|
-| Biblioteca games | Implementada | Detección estructural, no garantía de compatibilidad |
-| System.json | Arranque nativo | startMapId, startX/Y, partyMembers; no toda la configuración del juego |
-| Actors.json | Actor inicial | Character sheet del primer miembro; sin estadísticas/batalla |
-| Tilesets.json | Implementado | Nombres de sheets, flags, paso por dirección y estrella |
-| MapXXX.json | Carga y exploración | Dimensiones, planos, regiones, eventos, loops; ver NATIVE_EXPLORATION.md |
-| PNG y sprites | Renderer SDL2 | PNG no cifrado, tiles 48px, A1–A5/B–E y characters; faltan reglas especiales de mesa/overpass/parallax |
-| Movimiento | Básico | Cuatro direcciones, interpolación, colisión de origen/destino y eventos; sin vehículos/followers/dash |
-| Eventos | Parcial | Acción, toque, autorun; texto, switches, self-switches, transferencias directas y espera |
-| Páginas/condiciones | Parcial | Prioridad inversa, switches/self-switches, grupo y variables iniciales; sin inventario dinámico |
-| Diálogos | Parcial | UTF-8 y paginación; sin faces, escape codes, elecciones ni todas las opciones de ventana |
-| CommonEvents.json | Solo inspección | Aún no se ejecutan eventos comunes |
-| Plugins.js | Solo metadatos | El JavaScript no se ejecuta; no hay VM ni soporte de plugins |
-| Scripts MV/NW.js | No implementado | Los comandos script detienen la sesión con diagnóstico |
-| Batalla y menús MV | Pendiente | No disponibles |
-| Audio | Pendiente | BGM/BGS/ME/SE no reproducidos |
-| Guardado | Pendiente | Existen directorios por juego, no serialización de partidas |
-| Imágenes cifradas | No soportado | Rechazadas explícitamente |
-| Windows x86_64 | Pruebas nativas | Build Debug/Release; SDL dummy/render y recorrido en C++ |
-| R36S/Linux ARM | Pendiente | Sin build ARM, prueba de firmware, mandos físicos ni métricas de rendimiento |
+| Biblioteca | Lista/detalles con preview compuesto de title1Name/title2Name | No garantiza compatibilidad del proyecto |
+| Título | Fondo original, nombre si optDrawTitle, Nueva partida/Continuar/Opciones y términos de System | Plugins de logos/título y transiciones; fuente GameFont aún no usada |
+| Mapas | Tiles/autotiles PNG, colisiones, sombras, cámara y loops | Parallax, overpass, vehículos y reglas de mesas incompletas |
+| Grupo | Actores iniciales, estadísticas básicas, faces, cambio de formación, seguidores optFollowers | Estados/traits completos, personajes fuera del grupo, experiencia/niveles dinámicos |
+| Movimiento | Interpolación, dash, seguidores hasta cuatro miembros | Rutas autónomas/forzadas de eventos y vehículos |
+| Menús | Objeto, habilidades, equipo, estado, formación, opciones, guardar y salir | Diseño nativo con Window.png/caras/términos; no reproduce scripts de ventanas ni todas las opciones |
+| Objetos/habilidades | Recuperar HP/MP, revivir, consumo y coste MP; inventario | Fórmulas JavaScript, TP, estados y efectos adicionales sin implementar |
+| Equipo | Elegir actor/slot/objeto, inventario, parámetros y permisos de clase | Optimizar, dual wield y reglas completas de traits pendientes |
+| Eventos | Acción/toque/autorun; elecciones, ramas, variables, llamadas comunes, bucles, etiquetas, transferencias | Paralelos y muchos operandos/comandos; ver NATIVE_EXPLORATION.md |
+| Mensajes | Paginación, face, fondo y posición, elecciones con cancelación configurada | Escape codes, fuente GameFont, efectos/timing originales |
+| Guardado | 20 slots propios, escritura con respaldo, carga atómica, grupo/equipo/recursos/mapa/switches/variables | No compatible con .rpgsave original. No guarda un intérprete en ejecución ni todos los sistemas MV |
+| Batallas | Pendiente | Tropas, acciones, daño, turnos, estados, recompensas, UI y animaciones |
+| Audio | Pendiente | BGM/BGS/ME/SE y opciones de volumen |
+| JavaScript/plugins | Solo inspección | Sin VM, APIs PIXI/DOM/NW.js, plugins ni scripts de eventos |
+| Imágenes cifradas | Rechazo explícito | No descifra assets |
+| PortMaster | ARM64 portable, SDL2 del firmware, GLIBC_2.17 | La versión anterior fue probada por el usuario; esta actualización requiere prueba física |
 
-No se afirma compatibilidad universal. Un proyecto puede abrir un mapa y aun así fallar al activar un evento o depender de APIs no soportadas. Los comandos desconocidos se diagnostican; no se omiten para aparentar funcionamiento.
+Errores de funciones desconocidas se registran y no se omiten para aparentar compatibilidad. No se añaden barras de diagnóstico al mapa. La fuente bitmap provisional y el layout nativo todavía difieren de MV.
 
-La demo RPG2LX - Primer viaje valida el camino: arranque → movimiento → diálogo → switch → transferencia al segundo mapa → retorno. Ver NATIVE_EXPLORATION.md para detalles y controles.
+Objetivo pendiente: un juego completo con eventos, combate, audio y scripts originales. No se afirma compatibilidad universal ni con todos los juegos de RPG Maker MV.

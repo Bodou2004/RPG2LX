@@ -4,7 +4,7 @@ Runtime portable para proyectos RPG Maker MV, con Linux en consolas de bolsillo 
 
 ## Estado
 
-Menú SDL2 y primer motor nativo de exploración MV: mapa inicial, tiles/sprites PNG, movimiento, colisiones, diálogos, switches y transferencias. Validado con Project1 del usuario. La compatibilidad es parcial; todavía no hay batalla, audio, guardado, plugins ni validación física en consola.
+0.3.0-alpha: biblioteca SDL2 con preview de título, escenas de título/menú, seguidores, objetos/habilidades/equipo básicos, formación, guardado/carga propios y eventos ampliados. Validado con archivos reales de Project1. La compatibilidad sigue siendo parcial: faltan batalla, audio, JavaScript/plugins y numerosos sistemas MV. La versión anterior arrancó en consola según el usuario; esta actualización requiere nueva prueba física.
 La compatibilidad universal es una meta, no una capacidad demostrada.
 
 ## Documentación
@@ -20,7 +20,9 @@ La compatibilidad universal es una meta, no una capacidad demostrada.
 
 ## Uso actual
 
-**Entrega para consola:** `dist/RPG2LX-PortMaster-aarch64-Project1.zip`. Extraer su contenido dentro de `ports` en la SD. Es un port ARM64 estándar, sin acoplamiento a un firmware y sin HUD añadido durante la partida. Falta probarlo físicamente en la consola.
+**Actualización para consola:** `dist/RPG2LX-0.3.0-PortMaster-update.zip` (runtime sin juegos), sobre la instalación inicial que contiene Project1. Es un port ARM64 estándar, sin acoplamiento a un firmware y sin HUD de diagnóstico durante la partida. Los saves propios quedan fuera de los assets y no son intercambiables con .rpgsave.
+
+X inicia el juego desde la biblioteca. En juego, A confirma/interactúa; B/Start abre o cancela el menú, Y corre. Para volver a biblioteca: menú → Salir → Biblioteca RPG2LX.
 
 Copiá cada juego completo dentro de `games/Nombre del juego/`. RPG2LX crea `games`, `saves`, `config` y `logs` al arrancar. También reconoce proyectos dentro de `games/Nombre del juego/www/`.
 
@@ -37,6 +39,6 @@ rpg2lx list --home /ruta/a/rpg2lx
 rpg2lx run /ruta/al/proyecto/MV --home /ruta/a/rpg2lx
 ```
 
-Codex implementa el núcleo, arquitectura y pruebas nativas; Antigravity colabora en tareas auxiliares de PortMaster y documentación.
+Codex implementa núcleo, arquitectura, escenas, integración y pruebas; Antigravity programó la nueva vista de biblioteca con imágenes de título en paralelo. El intercambio queda en COORDINATION.md.
 
 Repositorio Git local; no se ha creado ni publicado un remoto.

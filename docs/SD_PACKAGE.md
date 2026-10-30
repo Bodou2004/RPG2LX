@@ -4,7 +4,7 @@ Esta entrega usa el contrato estándar de PortMaster. El motor no consulta el fi
 
 ## Instalación
 
-Archivo: `dist/RPG2LX-PortMaster-aarch64-Project1.zip`.
+Paquete inicial con Project1: `dist/RPG2LX-PortMaster-aarch64-Project1.zip` (0.2). Actualización del runtime 0.3: `dist/RPG2LX-0.3.0-PortMaster-update.zip`, sin juegos. Extraer la actualización sobre la instalación existente conserva games/ y saves/.
 
 Extraer el contenido directamente en la carpeta **ports** de la SD donde están los otros ports:
 
@@ -21,7 +21,7 @@ ports/
     └── LEEME-SD.txt
 ```
 
-Abrir RPG2LX desde Ports, elegir Project1 y pulsar X en detalles. Cruceta/stick caminan, A interactúa y B vuelve a la biblioteca en esta versión experimental. No copiar SDKs, DLLs ni ejecutables Windows. No se escribió en ninguna SD desde el entorno de desarrollo: se entrega el ZIP y el directorio preparado para copiar.
+Abrir RPG2LX desde Ports, elegir Project1 y pulsar X. Se abre su título con Nueva partida/Continuar. Cruceta/stick caminan, A interactúa, B/Start abre o cancela el menú y Y corre. Biblioteca: Menú → Salir → Biblioteca RPG2LX. No copiar SDKs, DLLs ni ejecutables Windows. La instalación inicial en H:/ports fue realizada y verificada por Codex con autorización del usuario.
 
 ## Sin HUD añadido
 
@@ -37,7 +37,7 @@ Se quitaron la banda NATIVO EXPERIMENTAL, los controles flotantes y el texto añ
 - Launcher probado con contrato PortMaster simulado: segunda SD/rutas con espacios, salida, limpieza y rechazo de arquitectura incorrecta.
 - Pruebas automáticas de desarrollo verifican carga y ausencia del HUD. No se solicita al usuario jugar en PC.
 
-**El binario ARM64 todavía no se ejecutó en hardware físico.** La prueba de SD comprobará integración, vídeo, controles y rendimiento. Siguen pendientes batalla, audio, guardado, menús MV y ejecución de JavaScript/plugins. Los logs están en rpg2lx/logs/portmaster.log y launcher.log.
+**El usuario probó la versión inicial en consola y señaló las limitaciones que motivan 0.3.** Esta actualización necesita una nueva prueba física. Incluye título, seguidores, menús y saves propios. Siguen pendientes batalla, audio y JavaScript/plugins, además de numerosos comandos y efectos. Los logs están en rpg2lx/logs/portmaster.log y launcher.log.
 
 ## Portabilidad y fuentes
 
@@ -46,6 +46,8 @@ Se quitaron la banda NATIVO EXPERIMENTAL, los controles flotantes y el texto añ
 El entorno que indicó el usuario se consultó solo como referencia: [Aurknix](https://github.com/lcdyk0517/distribution_aurknix), commit `e4cc43eb8eb56d94ff4054884554f22bac4d4f0a`. Su [paquete SDL2](https://github.com/lcdyk0517/distribution_aurknix/blob/e4cc43eb8eb56d94ff4054884554f22bac4d4f0a/projects/ROCKNIX/packages/graphics/SDL2/package.mk) declara 2.32.10 y [glibc](https://github.com/lcdyk0517/distribution_aurknix/blob/e4cc43eb8eb56d94ff4054884554f22bac4d4f0a/projects/ROCKNIX/packages/devel/glibc/package.mk) 2.40. No se incorporó código de esa distribución al runtime ni se condiciona su ejecución al nombre del sistema.
 
 Paquete local con archivos del usuario; no se publicó en Internet ni se envió a un catálogo.
+
+Actualización 0.3 instalada en H:/ports: 14 archivos de runtime/metadatos/manifiesto, con respaldo local previo y verificación SHA-256 de las 1115 entradas instaladas. Los 1104 archivos de games/saves/config/logs conservaron tamaño/fecha. Reporte local build/sd-update-report.json. No se expulsó la tarjeta.
 
 ## Reconstrucción
 

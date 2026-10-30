@@ -1,4 +1,4 @@
-> Actualización 0.2.0-alpha: la sesión nativa y el renderer de mapas ya están implementados en src/mv/session.cpp, tile_layout.cpp y src/render/map_view.cpp. Ver NATIVE_EXPLORATION.md y MV_COMPATIBILITY.md para el alcance vigente. El resto de este documento conserva el diseño base inicial.
+> Actualización 0.3.0-alpha: sesión/intérprete en src/mv/session.cpp; escenas, grupo y persistencia en src/mv/game_state.cpp; renderer de juego en src/render/map_view.cpp; biblioteca de Antigravity en src/launcher/library_view.cpp. Ver NATIVE_EXPLORATION.md y MV_COMPATIBILITY.md para el alcance vigente. El resto de este documento conserva el diseño base inicial.
 
 # RPG2LX — Arquitectura Técnica
 

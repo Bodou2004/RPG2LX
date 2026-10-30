@@ -15,10 +15,11 @@ INSTALAR
 1. Extrae RPG2LX.sh y la carpeta rpg2lx dentro de la carpeta ports de la SD
    donde tienes tus otros ports. Ambos deben quedar al mismo nivel.
 2. Expulsa la SD correctamente, colócala en la consola y abre RPG2LX desde Ports.
-3. Selecciona Project1 y entra a sus detalles; X inicia el modo nativo.
+3. Selecciona tu juego y pulsa X: aparece su titulo con Nueva partida/Continuar.
    Si este paquete no incluye juegos, copia uno completo a rpg2lx/games/Nombre/.
 4. Dentro del mapa: cruceta/stick para caminar, A para interactuar,
-   B para volver a la biblioteca en esta versión experimental.
+   B o Start para abrir/cerrar el menu del juego; Y para correr.
+   Para volver a la biblioteca: menu > Salir > Biblioteca RPG2LX.
 
 PARTIDA
 No hay barra, contador, indicador ni instrucciones añadidas por RPG2LX.
@@ -30,7 +31,10 @@ Port estándar PortMaster aarch64; el núcleo no tiene reglas de un firmware.
 Usa SDL2 y glibc del dispositivo. No reemplaza sus bibliotecas ni archivos.
 Es una build experimental, todavía sin prueba física de esta entrega.
 Implementa exploración nativa parcial, no todos los juegos/plugins de MV.
-Faltan batalla, audio, guardado, menús MV y ejecución de JavaScript/plugins.
+Incluye titulo, seguidores segun optFollowers, menus nativos y guardado/carga.
+Los saves propios estan en saves/<juego>/; no son .rpgsave intercambiables con MV.
+Faltan batalla, audio, VM/plugins y numerosos comandos/efectos originales.
+Las ventanas usan Window.png y faces del juego; la fuente aun es provisional.
 
 SI NO ARRANCA
 Verifica que PortMaster esté instalado y actualizado y que hayas extraído
@@ -85,6 +89,7 @@ def main():
         if game.name in ('','.','..'):parser.error('Invalid game folder name')
         shutil.copytree(game,runtime/'games'/game.name)
     (runtime/'build-info.json').write_text(json.dumps({
+        'runtime_version':'0.3.0-alpha',
         'platform':'PortMaster Linux aarch64','firmware_specific_code':False,
         'in_game_runtime_hud':False,'tested_on_hardware':False,'elf':report,
         'includes_user_game':bool(game),'game_folder':game.name if game else None

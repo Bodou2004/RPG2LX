@@ -8,7 +8,7 @@
   "items_opt": [],
   "attr": {
     "title": "RPG2LX - RPG Maker MV Runtime",
-    "desc": "Experimental RPG Maker MV library and native map exploration: movement, dialogue and transfers. No battle, audio, save system or JavaScript plugins yet.",
+    "desc": "Experimental native RPG Maker MV runtime: title preview, game menus, followers, inventory and native saves. Battle, audio, JavaScript/plugins and complete MV compatibility are still pending.",
     "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. Saves and settings are kept outside game assets.",
     "genres": [
       "rpg"

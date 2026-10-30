@@ -1,40 +1,15 @@
 # Estado de RPG2LX
 
-Actualizado por Codex: 2026-10-30, America/Buenos_Aires.
+2026-10-30 — versión 0.3.0-alpha.
 
-## Reparto vigente
+Codex implementa núcleo, escenas, controles, grupo, guardado, renderer e integración. Antigravity programó LibraryView con preview de título en paralelo (A003); Codex integró y corrigió proporciones, Unicode y distribución. Registro compartido: COORDINATION.md.
 
-Codex implementa núcleo, arquitectura, compilación y pruebas nativas. Antigravity se ocupa de tareas auxiliares en PortMaster y su documentación. Traspaso registrado en C004 y confirmado en la conversación de Antigravity.
+La versión anterior instalada en H:/ports arrancó en consola según el usuario, pero solo permitía exploración y B destruía la sesión. La actualización cambia B/Start/X a menú/cancelación del juego. Volver a biblioteca exige elegir esa opción en la pantalla Salir; esa pantalla abre con Cancelar seleccionado.
 
-## Implementado
+Implementado: título del proyecto, menú nativo con términos/caras/Window.png, seguidores, dash, formación, estado, inventario y uso básico de objetos/habilidades, equipo y estadísticas. Guardado/carga en slots propios fuera del juego, con respaldo al reemplazar y carga que conserva la sesión si falla. Eventos ampliados con elecciones, condiciones, variables, llamadas comunes, etiquetas/bucles e inventario/HP/MP.
 
-- CLI C++17 con --help, --version, inspect, inspect-map y list; menú gráfico SDL2 al abrir sin argumentos o usar launcher.
-- Inspector: lectura de System, MapInfos, Actors y CommonEvents; metadatos, conteos y configuración estática de plugins sin ejecución. Aún no valida toda la semántica de la base de datos ni certifica que el juego sea jugable. El menú detecta estructura, no ejecución ni compatibilidad de plugins.
-- Parser JSON con validación de sintaxis, Unicode UTF-8/escapes/pares sustitutos, números finitos, claves duplicadas y límite de profundidad. No se ha realizado una auditoría exhaustiva ni fuzzing.
-- Módulo MapLoader/MapData de Codex: seis planos, dimensiones, tileset, scroll por eje, regiones, sombras y eventos/páginas/comandos/parámetros. Lectura independiente del renderer y diagnósticos por datos inválidos. Ver MAP_DATA.md.
-- CMake, pruebas nativas y pruebas CLI sobre el ejecutable real; instrucciones reproducibles en BUILDING.md.
-- Biblioteca games y menú SDL2 de Codex: lista paginada, detalles, comprobación de datos, navegación de mando/teclado y salida; detecta proyecto directo o www. Partidas/configuración separadas por carpeta; X/P inicia el motor nativo parcial.
-- Motor GameSession: tilesets/flags, colisión bilateral, movimiento, actor inicial, eventos y transferencias. Renderer PNG con autotiles/sprites/cámara. Validado también contra Project1 del usuario, sin modificarlo; ver NATIVE_EXPLORATION.md. La escena sintética ya no aparece en la biblioteca y queda como fixture interna.
-- Plantillas PortMaster adaptadas al menú launcher --home, sin duplicación de controles SDL/gptokeyb. No hay paquete ARM jugable.
+La ejecución sigue siendo nativa parcial. No hay VM/plugins, batalla ni audio; faltan rutas, efectos, estados y otros comandos. GameFont no se carga todavía. La matriz exacta está en MV_COMPATIBILITY.md. Los saves propios no son los de MV original.
 
-## Validación ejecutada
+Validación de desarrollo: suites CTest Debug/Release, render oculto SDL con Project1 y prueba de título → nueva partida → seguidores → menú/equipo → guardar → continuar. Capturas y logs solo en build/. No se pide al usuario jugar en PC ni se modifican los archivos del juego.
 
-Windows x86_64 con Zig 0.13.0 / Clang 18.1.6, CMake 4.4.4 y Ninja 1.13.2 preparados localmente en build/.
-
-- Configuración y build CMake Debug: completadas sin avisos del código en el log de build.
-- CTest Debug/Release del menú: 8/8 grupos del nuevo motor: inspector, JSON, mapas, biblioteca/modelo, sesión nativa, arranque SDL, CLI y renderizado de juego. Resultados finales del nuevo hito en build/session-debug-tests.log y build/session-release-tests.log.
-- La suite CLI incorpora apertura de exportaciones www/archivos de entrada e identidad MV/MZ además de los 10 casos previos (incluyendo biblioteca, directorios en conflicto y carpetas Unicode) sobre el binario C++, con fixtures temporales, corrupción de cada archivo requerido, errores de tipos, Unicode, rutas con espacios, plugins comentados y datos de mapa inválidos.
-- La primera prueba de plugins detectó un caso de lectura incorrecta de comentarios con corchetes; Codex lo corrigió y la suite final pasa.
-- Build Release del menú: CMake Release con NDEBUG y suites nativas; resultados finales en build/menu-release-tests.log. La prueba Unicode detectó argv ANSI en Windows; Codex agregó conversión explícita desde argumentos UTF-16 y el caso final pasa.
-
-## Pendiente
-
-Hay renderer de mapas, movimiento e intérprete inicial de eventos. Faltan audio, VM/plugins JavaScript, batalla, menús internos, guardado y muchos comandos MV. Se verificó carga/render/movimiento/colisión en Project1 real y las regresiones internas; no se certificó un juego completo ni sus plugins. Build ARM64 completada y verificada como ELF Linux; prueba física R36S pendiente. Las fixtures son datos de prueba propios, no juegos completos.
-
-Próximo trabajo principal de Codex: extender eventos (variables, condiciones, elecciones y eventos comunes), persistencia y audio; seguir validando contra Project1 del usuario, especialmente escenas y plugins originales. Luego preparar y medir build ARM. Antigravity continúa con empaquetado y tareas auxiliares según encargo.
-
-Validación externa Project1: carga directa con run, render del mapa original y movimiento/colisión nativa comprobados. Snapshot de 1102 archivos originales sin cambios; copia local en games/Project1 excluida de Git. Tests de run comprueban que el árbol de archivos fuente permanece intacto.
-
-## Entrega SD/PortMaster
-
-Paquete local dist/RPG2LX-PortMaster-aarch64-Project1.zip, con launcher y Project1 completo. Núcleo independiente del firmware; PortMaster resuelve controles/plataforma. ELF AArch64 con SDL2 dinámica y símbolos GLIBC_2.17; sin SDK o bibliotecas Windows en la entrega. Integridad ZIP y manifiesto de archivos comprobados. La banda e instrucciones de RPG2LX se retiraron del mapa; los errores se escriben al registro y vuelven a biblioteca. Ver SD_PACKAGE.md para instalación y alcance. El paquete está preparado para prueba, no validado físicamente en consola.
+ARM64 usa el mismo contrato PortMaster, SDL2 del firmware y símbolos GLIBC_2.17. Ver SD_PACKAGE.md para artefactos y controles. La prueba física de esta nueva versión sigue pendiente; no confundirla con la prueba de la versión anterior.

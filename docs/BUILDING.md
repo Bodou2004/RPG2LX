@@ -33,4 +33,4 @@ python tests/test_cli_native.py build/native-debug/rpg2lx.exe
 
 ## Alcance
 
-Una build Windows verifica el núcleo portable, no ABI ARM, gráficos, controles ni integración PortMaster. Compilación ARM con sysroot/firmware adecuado y prueba en consola siguen pendientes. No usar el antiguo prototipo `tools/rpg2lx_ref.py` para certificar cambios C++.
+Una build Windows verifica el núcleo y, con SDL, renderizado automatizado; no demuestra controles/rendimiento físicos. La build ARM64 y empaquetado están en tools/build_arm64.py y tools/package_sd.py; ver SD_PACKAGE.md. El usuario probó la versión anterior en consola; la nueva 0.3 necesita prueba física. No usar el antiguo prototipo tools/rpg2lx_ref.py para certificar cambios C++.

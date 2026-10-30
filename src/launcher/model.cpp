@@ -9,14 +9,24 @@ const GameEntry* LauncherModel::selected() const {
     return index_ < games_.size() ? &games_[index_] : nullptr;
 }
 
-bool LauncherModel::open_project(const std::filesystem::path& project) {
+bool LauncherModel::open_project(const std::filesystem::path& project, bool title) {
     GameSession next;
     std::string error;
-    if(!next.boot(project,error)) {
+    if(!next.boot(project,error,!title)) {
         message_="No se pudo abrir el proyecto: "+error;
         Logger::error(message_);return false;
     }
     for(const auto& warning:next.warnings())Logger::warn(warning);
+    std::string save_id;
+    for(const auto& game:games_)if(game.detected&&game.project==next.project()){save_id=game.id;break;}
+    if(save_id.empty()) {
+        // Direct exports with the same folder name must not share saves.
+        std::uint64_t hash=14695981039346656037ULL;
+        for(unsigned char ch:next.project().u8string()){hash^=ch;hash*=1099511628211ULL;}
+        save_id="external-"+std::to_string(hash);
+    }
+    next.set_save_directory(library_.home()/"saves"/std::filesystem::u8path(save_id));
+    if(title)next.show_title();
     session_=std::move(next);message_.clear();return true;
 }
 
@@ -33,8 +43,12 @@ void LauncherModel::refresh() {
 
 void LauncherModel::act(MenuAction action) {
     if (session_) {
-        if (action == MenuAction::Back) { session_.reset(); message_.clear(); }
+        if (action == MenuAction::CloseSession) { session_.reset(); message_.clear(); }
+        else if (action == MenuAction::Back) session_->cancel();
+        else if (action == MenuAction::Up) session_->navigate(8);
+        else if (action == MenuAction::Down) session_->navigate(2);
         else if (action == MenuAction::Confirm) session_->confirm();
+        if(session_&&session_->wants_library()){session_.reset();message_.clear();}
         return;
     }
     if (action == MenuAction::Refresh) { refresh(); return; }
@@ -47,7 +61,7 @@ void LauncherModel::act(MenuAction action) {
         index_ = index_ == 0 ? games_.size() - 1 : index_ - 1;
     if (action == MenuAction::Down && !details_ && !games_.empty())
         index_ = (index_ + 1) % games_.size();
-    if (action == MenuAction::Play && details_ && selected() && selected()->detected) {
+    if (action == MenuAction::Play && selected() && selected()->detected) {
         std::string error;
         if (!library_.prepare_game(*selected(),error)) {
             message_ = "No se pudo iniciar: " + error;

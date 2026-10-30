@@ -22,21 +22,23 @@ rpg2lx/
 
 Copiar cada juego completo dentro de una carpeta inmediata de `games/`. Se reconoce la estructura directa y la estructura con `www/`. No hace falta crear un port separado por juego. Las carpetas ocultas, enlaces simbólicos de la biblioteca y archivos sueltos no aparecen en la lista. Una carpeta incompleta aparece con aviso.
 
-El título viene de `System.json`; la identidad para partidas y configuración es el nombre de la carpeta. Dos juegos con el mismo título mantienen directorios separados. Si se cambia el nombre de una carpeta, también hay que renombrar su carpeta correspondiente de saves/config para conservar esa asociación. RPG2LX no escribe partidas en los assets. Actualmente solo prepara los directorios; aún no hay formato ni ejecución de guardado.
+El título viene de `System.json`; la identidad para partidas y configuración es el nombre de la carpeta. Dos juegos con el mismo título mantienen directorios separados. Si se cambia el nombre de una carpeta, también hay que renombrar su carpeta correspondiente de saves/config para conservar esa asociación. RPG2LX no escribe partidas en los assets. La versión 0.3 guarda 20 slots JSON propios en saves/<carpeta>/, con respaldo al reemplazar. No son .rpgsave de MV.
+
+La biblioteca creada por Antigravity compone title1Name/title2Name desde img/titles1 e img/titles2 como vista previa. Si falta una imagen muestra una tarjeta alternativa sin interrumpir la biblioteca.
 
 ## Controles
 
 - D-pad o stick izquierdo: elegir juego.
 - A / Enter / Z: ver detalles; dentro de detalles, comprobar los datos.
 - B / Escape / X: volver; desde la lista, salir.
-- X / P dentro de detalles: iniciar modo nativo experimental. En mapa, A/Enter/Z interactúa y B/Escape termina la sesión y vuelve a detalles.
+- X / P desde lista o detalles: abrir el título del juego. En mapa, A/Enter/Z/espacio interactúa; B/Start/X/Escape abre o cancela el menú; Y/Shift corre. Volver a biblioteca exige Menú → Salir → Biblioteca RPG2LX. No se destruye la sesión al cancelar.
 - Y / R: actualizar la biblioteca sin reiniciar. La selección se conserva por carpeta cuando sigue disponible.
 
-La interfaz se adapta mediante resolución lógica 640x480 y usa SDL2 GameController. El bitmap de texto incluye ASCII y Latin-1 (tildes y ñ); otros caracteres se muestran como `?` por ahora. No es todavía una interfaz de localización completa. La detección de estructura MV no distingue infaliblemente proyectos MZ ni prueba compatibilidad de plugins.
+La biblioteca usa resolución lógica 640x480 y SDL2 GameController; el juego usa las dimensiones detectadas, 816x624 por defecto. El bitmap de texto incluye ASCII y Latin-1 (tildes y ñ); otros caracteres se muestran como `?` por ahora. GameFont sigue pendiente. Se rechazan proyectos identificados explícitamente como MZ; detectar MV no prueba compatibilidad de plugins.
 
 ## Estado actual
 
-El menú es funcional: biblioteca vacía, lista paginada, detalles, comprobación de datos, directorios separados y salida. Desde detalles, X/P abre la primera ejecución nativa de mapas y eventos básicos. Ver NATIVE_EXPLORATION.md para la demo y sus límites. No se ejecuta JavaScript al explorar, comprobar ni iniciar esta sesión nativa; juegos que dependan de plugins pueden fallar o mostrar diferencias.
+La biblioteca ofrece lista paginada, preview, detalles y comprobación. X/P abre el título original dentro del soporte nativo. Hay seguidores, menús del juego y persistencia propia; ver NATIVE_EXPLORATION.md y MV_COMPATIBILITY.md. No se ejecuta JavaScript: batalla, audio, plugins y muchos sistemas siguen pendientes.
 
 ## Compilación y diagnóstico
 

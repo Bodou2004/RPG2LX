@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rpg2lx VERSION 0.2.0 LANGUAGES CXX)
+project(rpg2lx VERSION 0.3.0 LANGUAGES CXX)
 option(RPG2LX_WITH_SDL "Build the graphical game library menu" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -20,6 +20,7 @@ add_library(rpg2lx_core STATIC
     src/core/inspector.cpp
     src/mv/map.cpp
     src/mv/session.cpp
+    src/mv/game_state.cpp
     src/mv/project_source.cpp
     src/mv/tile_layout.cpp
     src/launcher/library.cpp
@@ -45,7 +46,7 @@ if(RPG2LX_WITH_SDL)
     target_compile_definitions(rpg2lx PRIVATE RPG2LX_WITH_SDL)
     target_include_directories(rpg2lx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/font8x8")
     target_link_libraries(rpg2lx PRIVATE SDL2::SDL2)
-    target_sources(rpg2lx PRIVATE src/render/map_view.cpp)
+    target_sources(rpg2lx PRIVATE src/render/map_view.cpp src/launcher/library_view.cpp)
     target_include_directories(rpg2lx SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
     if(WIN32 AND TARGET SDL2::SDL2)
         add_custom_command(TARGET rpg2lx POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -81,8 +82,17 @@ add_test(NAME LibraryTests COMMAND test_library "${CMAKE_CURRENT_SOURCE_DIR}/fix
 add_executable(test_session tests/test_session.cpp)
 target_link_libraries(test_session PRIVATE rpg2lx_core)
 add_test(NAME SessionTests COMMAND test_session "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/playable_project")
+add_executable(test_game_state tests/test_game_state.cpp)
+target_link_libraries(test_game_state PRIVATE rpg2lx_core)
+add_test(NAME GameStateTests COMMAND test_game_state "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/playable_project")
 
 if(RPG2LX_WITH_SDL)
+    add_executable(test_game_view tests/test_game_view.cpp src/render/map_view.cpp src/launcher/library_view.cpp)
+    target_link_libraries(test_game_view PRIVATE rpg2lx_core SDL2::SDL2)
+    target_include_directories(test_game_view PRIVATE third_party/font8x8)
+    target_include_directories(test_game_view SYSTEM PRIVATE third_party/stb)
+    add_test(NAME GameViewTests COMMAND test_game_view "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/playable_project")
+    set_tests_properties(GameViewTests PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")
     add_test(NAME LauncherSmoke COMMAND rpg2lx launcher --home "${CMAKE_CURRENT_BINARY_DIR}/smoke-home"
         --smoke-frames 2)
     set_tests_properties(LauncherSmoke PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_AUDIODRIVER=dummy")

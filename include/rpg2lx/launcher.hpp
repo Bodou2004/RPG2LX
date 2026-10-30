@@ -3,14 +3,14 @@
 #include "rpg2lx/session.hpp"
 
 namespace rpg2lx {
-enum class MenuAction { Up, Down, Confirm, Back, Refresh, Play };
+enum class MenuAction { Up, Down, Confirm, Back, Refresh, Play, CloseSession };
 
 class LauncherModel {
 public:
     explicit LauncherModel(GameLibrary& library);
     void act(MenuAction action);
     void refresh();
-    bool open_project(const std::filesystem::path& project);
+    bool open_project(const std::filesystem::path& project, bool title=true);
     const GameEntry* selected() const;
     const std::vector<GameEntry>& games() const { return games_; }
     const std::vector<std::string>& errors() const { return errors_; }

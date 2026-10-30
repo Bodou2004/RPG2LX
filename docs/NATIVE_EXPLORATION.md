@@ -1,65 +1,44 @@
-# Primer motor nativo de exploración
+# Motor nativo y escenas — RPG2LX 0.3.0-alpha
 
-Implementado por Codex el 2026-10-30. Es una primera porción del runtime MV, no una máquina JavaScript ni soporte completo de juegos.
+Usa los archivos de un proyecto real sin convertir ni editar sus mapas. Abrir con `run <carpeta>` o desde games/. Una exportación dentro de www/ también sirve. Los datos sintéticos de fixtures/ se usan solamente para regresiones de desarrollo.
 
-## Abrir archivos originales de RPG Maker MV
+## Controles
 
-El objetivo es ejecutar proyectos exportados por MV. Copiar una carpeta completa a games/ o abrirla directamente con:
+En biblioteca: cruceta/stick elige; X/P inicia y muestra el título; A/Enter abre detalles. En juego: cruceta/stick mueve; A/Enter/Z/espacio confirma/interactúa; B/X/Start/Esc abre o cancela el menú; Y/Shift corre. B durante un mensaje no cierra la sesión. El título ignora cancelar. Volver a biblioteca exige seleccionar expresamente Menú → Salir → Biblioteca RPG2LX; Salir abre con Cancelar seleccionado.
 
-```text
-rpg2lx run /ruta/al/proyecto/MV --home /ruta/a/rpg2lx
-```
+## Datos respetados
 
-En Windows también se puede arrastrar la carpeta, index.html, Game.exe o .rpgproject sobre RPG2LX.cmd. No se ejecuta el EXE ni se modifican los datos; se resuelven los archivos MV desde esa ruta, incluyendo exportaciones con www/.
+System: título, capas title1Name/title2Name, optDrawTitle, optFollowers, grupo, términos y flags de comandos del menú. Actores/clases/equipo: personajes, faces, nivel inicial, parámetros básicos, habilidades iniciales, inventario y permisos de equipo. Las ventanas usan img/system/Window.png; la fuente bitmap sigue siendo provisional. El viewport del juego parte de 816x624 o de las dimensiones detectadas por el inspector; la biblioteca usa 640x480.
 
-En la biblioteca, seleccionar el juego y pulsar X/P en detalles inicia el modo nativo. Flechas/D-pad/stick caminan, A/Enter/Z interactúa y B/Escape vuelve a la biblioteca. Todavía no hay guardado.
+Los seguidores persiguen la posición previa del miembro anterior y respetan los mapas con loops. Se reúnen tras una transferencia y se pueden ocultar mediante el comando MV. Hasta cuatro personajes visibles, como el grupo de batalla MV por defecto.
 
-## Primera validación con el proyecto del usuario
+Guardado: saves/<identidad de carpeta>/file1.json a file20.json, fuera del proyecto. Al reemplazar un slot se conserva .bak; la carga valida y construye la sesión antes de sustituir la actual. Guarda posición, dirección, switches, self-switches, variables, inventario, oro, grupo/equipo/habilidades y HP/MP. Formato propio, no intercambiable con .rpgsave. Guardado durante un intérprete activo no soportado.
 
-Project1 se cargó desde su carpeta original de Documentos/Games: System, Map001 (17x13), Tilesets, Actor1/Harold y seis eventos People3. Se verificaron arranque, render de PNG originales, movimiento y colisión con EV002. Se compararon 1102 archivos originales por tamaño/fecha y hashes de JSON/JS/HTML/proyecto: sin cambios. No se añadieron personajes, mapas ni eventos al proyecto del usuario.
+## Intérprete actual
 
-Community_Basic y CustomLogo están activos en su plugins.js; se informa explícitamente que aún no se ejecutan. La validación es del modo nativo parcial, no de escenas de arranque, plugins, batalla o juego completo.
-
-La escena sintética anterior se retiró de la biblioteca de trabajo. Sus archivos siguen únicamente como fixtures internas para automatizar regresiones sin redistribuir el proyecto ni assets del usuario.
-
-## Implementación actual
-
-- Arranque desde System.json: mapa, coordenadas, actor de la primera posición del grupo y su character sheet.
-- Tilesets.json: nueve nombres de imágenes, flags por tile y comprobación de referencias.
-- Mapas de seis planos; tiles normales B–E/A5 y ensamblado de autotiles A1–A4. A1 incluye la cadencia inicial de agua/cascada.
-- PNG RGBA con transparencia, personajes individuales `$` y sheets de ocho personajes, direcciones y animación al caminar. Convención `!` sin desplazamiento vertical.
-- Cámara que sigue al jugador, mapas pequeños centrados, scroll continuo según ejes, sombras y tiles con estrella por encima de personajes.
-- Movimiento en cuatro direcciones con interpolación; se comprueban la salida de origen y la entrada del destino. Los flags estrella no deciden paso. Los eventos sólidos bloquean la casilla.
-- Páginas en orden inverso, con condiciones de switches, self-switches, actor del grupo y variables iniciales en cero. Inventario inicial vacío; no hay todavía comandos de inventario.
-- Eventos por acción, toque y autorun. Mensajes paginados con hasta cuatro líneas por página. Los comandos posteriores esperan a que se cierren todas las páginas.
-- Al transferir se valida el nuevo mapa/tileset antes de cambiar los datos. Se descartan texturas al cambiar de mapa o salir de la sesión.
-
-## Comandos de eventos soportados
-
-| ID | Comando | Alcance |
+| IDs | Función | Límites |
 |---|---|---|
-| 0 | Fin/entrada vacía | Finaliza la lista cuando no quedan comandos |
-| 101, 401 | Mostrar texto | Texto UTF-8/Latin-1 visible, paginación; sin faces, escape codes ni selección de ventana |
-| 108, 408 | Comentarios | Sin efecto de juego |
-| 121 | Control de switches | Rangos limitados, ON/OFF |
-| 123 | Control de self-switch | A–D por mapa/evento |
-| 201 | Transferir jugador | Solo coordenadas e ID directos; sin transición de pantalla |
-| 230 | Esperar | Frames a 60 Hz con límite de duración |
+| 0, 108/408 | Fin/comentarios | Preserva orden |
+| 101/401, 102/402/403/404 | Texto y elecciones | Faces/fondo/posición, paginación y cancelación configurada; faltan escapes y efectos |
+| 111/411/412 | Condiciones | Switches, variables, self-switch, miembro del grupo, oro e ítems; otros tipos producen diagnóstico |
+| 112/113/413, 115 | Bucles, romper, salir | Presupuesto de 1000 instrucciones por ejecución |
+| 117 | Evento común | Llamadas anidadas hasta 32, espera/retorno; autorun común por switch; no paralelos |
+| 118/119 | Etiquetas/saltar | Etiquetas de la misma lista |
+| 121/122/123 | Switches/variables/self-switch | Variables enteras con constantes u otra variable; faltan random, game data y scripts |
+| 125–129 | Oro, ítems, armas/armaduras y grupo | Inventario limitado; estado de actores fuera del grupo pendiente |
+| 134/135 | Guardar/menú habilitado | Flags persistidos |
+| 201 | Transferencia | ID/coordenadas directos o variables, dirección y reunión del grupo; sin fade |
+| 216/217 | Seguidores | Mostrar/ocultar/reunir |
+| 230 | Espera | Frames a 60 Hz |
+| 311/312/314/318 | HP/MP, recuperar todo y habilidades | Solo actores actuales, no todos los estados/traits |
+| 351/352/354 | Menú/guardar/título | Guardado dentro de un intérprete no implementado |
 
-Un comando desconocido, por ejemplo 355 (script), detiene la sesión con diagnóstico en pantalla y registro. No se ignora para fingir que el juego funciona.
+Un comando no implementado, como 355/script, se registra y detiene la sesión; no se ejecuta ni se omite silenciosamente. El diagnóstico se muestra fuera de la partida, sin HUD sobre el mapa.
 
-## Límites explícitos
+## Verificación y pendientes
 
-No están implementados: batalla, audio, guardado/carga, menús internos MV, VM/plugin JavaScript, elecciones y ramas, inventario, rutas autónomas de eventos, vehículos, followers, parallax, movie, efectos, escape codes de mensajes, bordes especiales de mesas y reglas de overpass. Los PNG cifrados se rechazan con diagnóstico. Los plugins no se ejecutan, por lo que un juego que dependa de ellos no es compatible por el hecho de abrir su mapa.
+GameStateTests comprueba seguidores, menú que conserva sesión, save/load y fallo atómico, elecciones/ramas/variables/eventos comunes, uso/consumo de objetos, habilidades y equipo persistente. GameViewTests renderiza escenas con SDL oculto. Project1 real se probó con su título Castle, caras y Window.png, sin editar el juego. Capturas: build/project1-scenes/.
 
-El renderer usa tiles MV estándar de 48px y viewport 640x480. No pretende reproducir todavía todos los tamaños y escalados de cada proyecto. Los nombres de assets deben ser nombres de archivo dentro de img/tilesets e img/characters. El cache actual admite hasta 96 MiB de texturas y 64 MiB por imagen decodificada; imágenes/comandos inválidos generan error visible.
+Siguen pendientes batalla, audio, VM/plugins, estados completos, rutas de eventos, vehículos, parallax, películas, cifrado y numerosos comandos/efectos. Abrir un mapa no equivale a ejecutar el motor MV completo. Matriz: MV_COMPATIBILITY.md.
 
-## Pruebas
-
-SessionTests ejecuta el recorrido completo (movimiento, NPC sólido, diálogo, switch, entrada y salida), interpolación, bloqueo inverso del destino, geometría de tiles/autotiles, arranque fallido sin destruir sesión, paginación y rechazo de scripts.
-
-NativeGameSmoke ejecuta el binario SDL2 real con driver dummy: comprueba ambos mapas, presencia de píxeles del tileset y del jugador, PNG faltante, assets cifrados y autorun desconocido. Las pruebas de renderer en Windows no validan mandos físicos, ABI ARM, firmware ni rendimiento en R36S.
-
-## Procedencia
-
-Las tablas de cuartos de autotiles y las fórmulas de layout se adaptaron de [Tilemap.js del corescript oficial MV](https://github.com/rpgtkoolmv/corescript/blob/master/js/rpg_core/Tilemap.js), con licencia MIT explícita. Se conserva el aviso en docs/legal/MV-CORESCRIPT-LICENSE.txt. La sesión, renderer SDL, carga de PNG, pruebas y assets de demo son implementación de RPG2LX. No se incorporó el código de ningún juego comercial.
+Las tablas de autotiles derivan del corescript oficial MIT; aviso conservado en docs/legal/MV-CORESCRIPT-LICENSE.txt. No se redistribuyen assets de prueba del usuario públicamente.

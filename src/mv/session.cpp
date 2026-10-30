@@ -66,7 +66,7 @@ std::uint32_t TilesetData::flag(int tile) const {
     return flags[static_cast<std::size_t>(tile)];
 }
 
-bool GameSession::boot(const fs::path& project, std::string& error) {
+bool GameSession::boot(const fs::path& project, std::string& error, bool run_start) {
     error.clear();
     try {
         GameSession next;
@@ -74,6 +74,7 @@ bool GameSession::boot(const fs::path& project, std::string& error) {
         if(!source)throw std::runtime_error(source.error);
         next.project_ = source.source->root;
         const auto system = read_json(next.project_ / "data/System.json");
+        next.system_=system;
         if (!system.is_object()) throw std::runtime_error("System.json must be object");
         if (enabled(system, "hasEncryptedImages")) throw std::runtime_error("Encrypted images are not supported by this native build");
         const int map = number(field(system, "startMapId"), 1, 999999, "startMapId");
@@ -83,23 +84,24 @@ bool GameSession::boot(const fs::path& project, std::string& error) {
             if (!party->is_array()) throw std::runtime_error("partyMembers must be array");
             for (const auto& id : party->arr_val) next.party_.push_back(number(id, 1, 999999, "party actor"));
         }
-        if (!next.party_.empty()) {
-            const auto actors = read_json(next.project_ / "data/Actors.json");
-            const auto id = static_cast<std::size_t>(next.party_.front());
-            if (!actors.is_array() || id >= actors.arr_val.size()) throw std::runtime_error("Starting actor not found");
-            const auto& actor = actors.arr_val[id];
-            const auto& name = field(actor, "characterName");
-            if (!name.is_string()) throw std::runtime_error("Actor characterName must be string");
-            next.player_image_.name = name.str_val;
-            next.player_image_.index = number(field(actor, "characterIndex"), 0, 7, "characterIndex");
-        }
+        if (!next.party_.empty()) next.actor_database_=read_json(next.project_/"data/Actors.json");
+        if(fs::exists(next.project_/"data/Classes.json"))next.classes_=read_json(next.project_/"data/Classes.json");
+        if(fs::exists(next.project_/"data/Items.json"))next.items_=read_json(next.project_/"data/Items.json");
+        if(fs::exists(next.project_/"data/CommonEvents.json"))next.common_events_=read_json(next.project_/"data/CommonEvents.json");
+        if(fs::exists(next.project_/"data/Weapons.json"))next.weapons_=read_json(next.project_/"data/Weapons.json");
+        if(fs::exists(next.project_/"data/Armors.json"))next.armors_=read_json(next.project_/"data/Armors.json");
+        if(fs::exists(next.project_/"data/Skills.json"))next.skills_=read_json(next.project_/"data/Skills.json");
+        next.followers_visible_=enabled(system,"optFollowers");
+        next.refresh_party();
         if (!next.load_map(map, x, y, error)) return false;
         next.warnings_.push_back("Modo nativo experimental: plugins JavaScript, batalla y audio pendientes.");
         const auto metadata=ProjectInspector::inspect(next.project_.u8string());
-        for(const auto& plugin:metadata.plugins)if(plugin.status)
+        next.screen_width_=std::clamp(metadata.screen_width,320,1920);next.screen_height_=std::clamp(metadata.screen_height,240,1080);
+        for(const auto& plugin:metadata.plugins)if(plugin.status) {
             next.warnings_.push_back("Plugin activo no ejecutado: "+plugin.name);
+        }
         *this = std::move(next);
-        check_autorun();
+        if(run_start)check_autorun();
         return true;
     } catch (const std::exception& e) { error = e.what(); return false; }
 }
@@ -136,6 +138,7 @@ bool GameSession::load_map(int id, int x, int y, std::string& error) {
         map_ = std::move(map); tileset_ = std::move(tileset); map_id_ = id;
         x_ = x; y_ = y; from_x_ = target_x_ = x; from_y_ = target_y_ = y; progress_ = 1;
         autorun_pending_ = true;
+        reset_followers();
         return true;
     } catch (const std::exception& e) { error = e.what(); return false; }
 }
@@ -155,7 +158,7 @@ bool GameSession::conditions_met(const JsonValue& c, int event_id) const {
         const auto* ch = c.find("selfSwitchCh");
         if (!ch || !ch->is_string() || !self_switches_.count(self_key(map_id_, event_id, ch->str_val))) return false;
     }
-    if (enabled(c, "itemValid")) return false; // Initial inventory is empty; inventory commands remain unsupported.
+    if (enabled(c, "itemValid") && item_count(member(c,"itemId",0))==0) return false;
     if (enabled(c, "actorValid") && std::find(party_.begin(), party_.end(), member(c, "actorId", 0)) == party_.end()) return false;
     return true;
 }
@@ -218,7 +221,7 @@ bool GameSession::passable(int x, int y, int direction) const {
 }
 
 bool GameSession::move(int direction) {
-    if (!valid_direction(direction) || moving() || !message_.empty() || !error_.empty() || !commands_.empty()) return false;
+    if (scene_!=GameScene::Map || !valid_direction(direction) || moving() || !message_.empty() || choosing() || !error_.empty() || !commands_.empty()) return false;
     direction_ = direction;
     if (!passable(x_,y_,direction)) {
         trigger_at(x_+dx(direction), y_+dy(direction), 1, true);
@@ -230,6 +233,21 @@ bool GameSession::move(int direction) {
     if (map_.loops_x()) x_ = wrap(x_, map_.width);
     if (map_.loops_y()) y_ = wrap(y_, map_.height);
     progress_ = 0;
+    // Followers chase the previous grid position of the preceding party member.
+    // Use a shortest wrapped displacement, preserving interpolation across map seams.
+    if(followers_visible_) {
+        int tx=static_cast<int>(from_x_),ty=static_cast<int>(from_y_);
+        for(auto& f:followers_) {
+            const int old_x=f.x,old_y=f.y;
+            int xx=tx-f.x,yy=ty-f.y;
+            if(map_.loops_x()&&std::abs(xx)>map_.width/2)xx+=xx>0?-map_.width:map_.width;
+            if(map_.loops_y()&&std::abs(yy)>map_.height/2)yy+=yy>0?-map_.height:map_.height;
+            f.from_x=f.x;f.from_y=f.y;f.to_x=f.x+xx;f.to_y=f.y+yy;
+            if(xx)f.direction=xx>0?6:4;else if(yy)f.direction=yy>0?2:8;
+            f.x=tx;f.y=ty;tx=old_x;ty=old_y;
+        }
+    }
+    ++steps_;
     return true;
 }
 
@@ -247,7 +265,7 @@ void GameSession::trigger_at(int x, int y, int trigger, bool normal) {
 }
 
 void GameSession::start_event(const MapEvent& event, const EventPage& page) {
-    event_id_ = event.id; commands_ = page.commands; command_index_ = 0; execute();
+    event_id_ = event.id;event_map_id_=map_id_; commands_ = page.commands; command_index_ = 0; branches_.clear();call_frames_.clear();execute();
 }
 
 void GameSession::check_autorun() {
@@ -257,9 +275,15 @@ void GameSession::check_autorun() {
         const auto* page = active_page(event);
         if (page && page->trigger == 3) { start_event(event, *page); return; }
     }
+    for(const auto& event:common_events_.arr_val)if(member(event,"trigger",0)==1 && switch_value(member(event,"switchId",0))) {
+        EventCommand call;call.code=117;JsonValue id;id.type=JsonType::Number;id.num_val=member(event,"id",0);call.parameters.push_back(id);
+        commands_={call};command_index_=0;event_id_=0;execute();return;
+    }
 }
 
 void GameSession::confirm() {
+    if(scene_!=GameScene::Map){confirm_scene();return;}
+    if(choosing()){finish_choice(choice_index_);return;}
     if (!error_.empty() || moving()) return;
     if (!message_.empty()) {
         if (!message_queue_.empty()) { message_ = std::move(message_queue_.front()); message_queue_.pop_front(); }
@@ -270,15 +294,101 @@ void GameSession::confirm() {
     if (commands_.empty() && message_.empty()) trigger_at(x_+dx(direction_), y_+dy(direction_), 0, true);
 }
 
+void GameSession::skip_branch(int indent) {
+    while(command_index_<commands_.size()&&commands_[command_index_].indent>indent)++command_index_;
+}
+void GameSession::finish_choice(int choice) {
+    branches_[choice_indent_]=choice;choices_.clear();message_.clear();execute();
+}
+bool GameSession::conditional(const EventCommand& c) const {
+    switch(parameter(c,0,0,13)) {
+        case 0:return switch_value(parameter(c,1,1,999999))==(parameter(c,2,0,1)==0);
+        case 1: {
+            const int lhs=variable_value(parameter(c,1,1,999999));
+            const int rhs=parameter(c,2,0,1)==0?parameter(c,3,-1000000000,1000000000):variable_value(parameter(c,3,1,999999));
+            switch(parameter(c,4,0,5)){case 0:return lhs==rhs;case 1:return lhs>=rhs;case 2:return lhs<=rhs;case 3:return lhs>rhs;case 4:return lhs<rhs;default:return lhs!=rhs;}
+        }
+        case 2: {
+            if(c.parameters.size()<3||!c.parameters[1].is_string())throw std::runtime_error("Invalid self-switch condition");
+            return (self_switches_.count(self_key(event_map_id_,event_id_,c.parameters[1].str_val))!=0)==(parameter(c,2,0,1)==0);
+        }
+        case 4: {
+            if(parameter(c,2,0,6)!=0)throw std::runtime_error("Unsupported actor condition");
+            return std::find(party_.begin(),party_.end(),parameter(c,1,1,999999))!=party_.end();
+        }
+        case 7: {const int value=parameter(c,1,0,99999999);const int op=parameter(c,2,0,2);return op==0?gold_>=value:op==1?gold_<=value:gold_<value;}
+        case 8:return item_count(parameter(c,1,1,999999))>0;
+        default:throw std::runtime_error("Unsupported conditional branch type");
+    }
+}
+
 void GameSession::execute() {
     try {
         unsigned budget = 1000;
-        while (command_index_ < commands_.size() && budget--) {
+        while ((command_index_ < commands_.size() || !call_frames_.empty()) && budget--) {
+            if(command_index_>=commands_.size()) {
+                auto frame=std::move(call_frames_.back());call_frames_.pop_back();commands_=std::move(frame.commands);command_index_=frame.index;branches_=std::move(frame.branches);continue;
+            }
             const auto command = commands_[command_index_++];
             switch (command.code) {
                 case 0: break;
                 case 108: case 408: break; // Comments.
+                case 102: {
+                    if(command.parameters.empty()||!command.parameters[0].is_array())throw std::runtime_error("Invalid choices");
+                    choices_.clear();for(const auto& choice:command.parameters[0].arr_val) {
+                        if(!choice.is_string())throw std::runtime_error("Invalid choice label");choices_.push_back(choice.str_val);
+                    }
+                    if(choices_.empty()||choices_.size()>100)throw std::runtime_error("Invalid choice count");
+                    choice_cancel_=parameter(command,1,-2,99);choice_index_=parameter(command,2,-1,99);
+                    choice_index_=std::clamp(choice_index_,0,static_cast<int>(choices_.size())-1);choice_indent_=command.indent;return;
+                }
+                case 402:if(branches_[command.indent]!=parameter(command,0,0,99))skip_branch(command.indent);break;
+                case 403:if(branches_[command.indent]!=-2)skip_branch(command.indent);break;
+                case 404:branches_.erase(command.indent);break;
+                case 111:branches_[command.indent]=conditional(command)?1:0;if(!branches_[command.indent])skip_branch(command.indent);break;
+                case 411:if(branches_[command.indent])skip_branch(command.indent);break;
+                case 412:branches_.erase(command.indent);break;
+                case 112:break;
+                case 113: {
+                    int depth=0;bool found=false;
+                    while(command_index_<commands_.size()) {
+                        const auto& next=commands_[command_index_++];
+                        if(next.code==112)++depth;
+                        if(next.code==413){if(depth==0){found=true;break;}--depth;}
+                    }
+                    if(!found)throw std::runtime_error("Break loop outside loop");break;
+                }
+                case 413: {
+                    bool found=false;std::size_t i=command_index_-1;
+                    while(i>0){--i;if(commands_[i].code==112&&commands_[i].indent==command.indent){command_index_=i+1;found=true;break;}}
+                    if(!found)throw std::runtime_error("Loop start missing");break;
+                }
+                case 115:command_index_=commands_.size();break;
+                case 117: {
+                    const int id=parameter(command,0,1,999999);
+                    if(static_cast<std::size_t>(id)>=common_events_.arr_val.size())throw std::runtime_error("Common event not found");
+                    const auto* list=common_events_.arr_val[id].find("list");
+                    if(!list||!list->is_array()||call_frames_.size()>=32)throw std::runtime_error("Invalid common event or call depth exceeded");
+                    std::vector<EventCommand> code;
+                    for(const auto& source:list->arr_val) {
+                        EventCommand c;c.code=member(source,"code",0);c.indent=member(source,"indent",0);
+                        if(const auto* params=source.find("parameters")) {if(!params->is_array())throw std::runtime_error("Invalid common event parameters");c.parameters=params->arr_val;}
+                        code.push_back(std::move(c));
+                    }
+                    call_frames_.push_back({std::move(commands_),command_index_,std::move(branches_)});commands_=std::move(code);command_index_=0;branches_.clear();break;
+                }
+                case 118:break;
+                case 119: {
+                    if(command.parameters.empty()||!command.parameters[0].is_string())throw std::runtime_error("Invalid label");
+                    bool found=false;
+                    for(std::size_t i=0;i<commands_.size();++i)if(commands_[i].code==118&&!commands_[i].parameters.empty()&&commands_[i].parameters[0].get_string()==command.parameters[0].str_val){command_index_=i+1;found=true;break;}
+                    if(!found)throw std::runtime_error("Event label not found");break;
+                }
                 case 101: {
+                    message_face_=command.parameters.size()>0?command.parameters[0].get_string():"";
+                    message_face_index_=command.parameters.size()>1?command.parameters[1].get_int():0;
+                    message_background_=command.parameters.size()>2?command.parameters[2].get_int():0;
+                    message_position_=command.parameters.size()>3?command.parameters[3].get_int(2):2;
                     message_.clear();
                     message_queue_.clear();
                     std::vector<std::string> lines;
@@ -308,7 +418,7 @@ void GameSession::execute() {
                         message_queue_.push_back(std::move(page));
                     }
                     if (!message_queue_.empty()) { message_=std::move(message_queue_.front()); message_queue_.pop_front(); }
-                    if (!message_.empty()) return;
+                    if (!message_.empty() && !(command_index_<commands_.size()&&commands_[command_index_].code==102)) return;
                     break;
                 }
                 case 121: {
@@ -318,30 +428,88 @@ void GameSession::execute() {
                     for (int id = first; id <= last; ++id) switches_[id] = on;
                     autorun_pending_ = true; break;
                 }
+                case 122: {
+                    const int first=parameter(command,0,1,999999),last=parameter(command,1,first,999999),op=parameter(command,2,0,5),operand=parameter(command,3,0,4);
+                    if(last-first>10000)throw std::runtime_error("Variable range exceeds budget");
+                    if(operand>1)throw std::runtime_error("Unsupported variable operand");
+                    const long long value=operand==0?parameter(command,4,-1000000000,1000000000):variable_value(parameter(command,4,1,999999));
+                    for(int id=first;id<=last;++id) {
+                        long long n=variable_value(id);
+                        switch(op){case 0:n=value;break;case 1:n+=value;break;case 2:n-=value;break;case 3:n*=value;break;case 4:n=value?n/value:0;break;case 5:n=value?n%value:0;break;}
+                        variables_[id]=static_cast<int>(std::clamp(n,-1000000000LL,1000000000LL));
+                    }
+                    autorun_pending_=true;break;
+                }
+                case 125: case 126: case 127: case 128: {
+                    const int offset=command.code==125?0:1;
+                    int amount=parameter(command,offset+1,0,1)==0?parameter(command,offset+2,0,99999999):variable_value(parameter(command,offset+2,1,999999));
+                    if(parameter(command,offset,0,1)==1)amount=-amount;
+                    if(command.code==125)gold_=std::clamp(gold_+amount,0,99999999);
+                    else {
+                        int id=parameter(command,0,1,999999);auto& pool=command.code==126?inventory_:command.code==127?weapon_inventory_:armor_inventory_;
+                        const int previous=pool[id];pool[id]=std::clamp(previous+amount,0,99);
+                        if(command.code!=126 && amount<0 && command.parameters.size()>4 && command.parameters[4].get_bool()) {
+                            int remaining=std::max(0,-amount-previous);
+                            for(auto& actor:actors_)for(auto& gear:actor.equips)if(remaining>0&&gear.first==(command.code==127?1:2)&&gear.second==id){gear.second=0;--remaining;refresh_stats(actor);}
+                        }
+                    }
+                    autorun_pending_=true;break;
+                }
+                case 129: {
+                    const int id=parameter(command,0,1,999999),op=parameter(command,1,0,1);
+                    auto it=std::find(party_.begin(),party_.end(),id);
+                    if(op==0&&it==party_.end())party_.push_back(id);else if(op==1&&it!=party_.end())party_.erase(it);
+                    refresh_party();autorun_pending_=true;break;
+                }
+                case 311: case 312: case 314: case 318: {
+                    const int id=parameter(command,0,0,1)==0?parameter(command,1,0,999999):variable_value(parameter(command,1,1,999999));
+                    for(auto& actor:actors_)if(id==0||actor.id==id) {
+                        if(command.code==314){actor.hp=actor.params[0];actor.mp=actor.params[1];continue;}
+                        if(command.code==318){
+                            const int skill=parameter(command,3,1,999999);auto it=std::find(actor.skills.begin(),actor.skills.end(),skill);
+                            if(parameter(command,2,0,1)==0){if(it==actor.skills.end())actor.skills.push_back(skill);}else if(it!=actor.skills.end())actor.skills.erase(it);continue;
+                        }
+                        int value=parameter(command,3,0,1)==0?parameter(command,4,0,99999999):variable_value(parameter(command,4,1,999999));
+                        if(parameter(command,2,0,1))value=-value;
+                        if(command.code==311&&actor.hp>0)actor.hp=std::clamp(actor.hp+value,command.parameters.size()>5&&command.parameters[5].get_bool()?0:1,actor.params[0]);
+                        else if(command.code==312)actor.mp=std::clamp(actor.mp+value,0,actor.params[1]);
+                    }
+                    break;
+                }
+                case 134:save_enabled_=parameter(command,0,0,1)!=0;break;
+                case 135:menu_enabled_=parameter(command,0,0,1)!=0;break;
+                case 216:followers_visible_=parameter(command,0,0,1)==0;reset_followers();break;
+                case 217:reset_followers();break;
+                case 351:set_scene(GameScene::Menu);return;
+                case 352:set_scene(GameScene::Save);return;
+                case 354:show_title();commands_.clear();return;
                 case 123: {
                     if (command.parameters.empty() || !command.parameters[0].is_string()) throw std::runtime_error("Invalid self-switch key");
                     const auto ch = command.parameters[0].str_val;
                     if (ch != "A" && ch != "B" && ch != "C" && ch != "D") throw std::runtime_error("Invalid self-switch key");
-                    const auto key = self_key(map_id_,event_id_,ch);
+                    if(event_id_==0)break;
+                    const auto key = self_key(event_map_id_,event_id_,ch);
                     if (parameter(command,1,0,1) == 0) self_switches_.insert(key); else self_switches_.erase(key);
                     autorun_pending_ = true; break;
                 }
                 case 201: {
-                    if (parameter(command,0,0,1) != 0) throw std::runtime_error("Variable-based transfer is not implemented");
-                    const int id = parameter(command,1,1,999999), x = parameter(command,2,0,10000), y = parameter(command,3,0,10000);
+                    const bool variable=parameter(command,0,0,1)!=0;
+                    const int id = variable?variable_value(parameter(command,1,1,999999)):parameter(command,1,1,999999);
+                    const int x = variable?variable_value(parameter(command,2,1,999999)):parameter(command,2,0,10000);
+                    const int y = variable?variable_value(parameter(command,3,1,999999)):parameter(command,3,0,10000);
                     const int direction = parameter(command,4,0,8);
                     if (direction && !valid_direction(direction)) throw std::runtime_error("Invalid transfer direction");
                     std::string error;
                     if (!load_map(id,x,y,error)) throw std::runtime_error(error);
                     if (direction) direction_ = direction;
-                    commands_.clear(); command_index_ = 0; return;
+                    reset_followers();break;
                 }
                 case 230: wait_ = parameter(command,0,0,36000) / 60.0; if (wait_ > 0) return; break;
                 default: throw std::runtime_error("Unsupported event command " + std::to_string(command.code) +
                             " at map " + std::to_string(map_id_) + ", event " + std::to_string(event_id_));
             }
         }
-        if (command_index_ < commands_.size()) throw std::runtime_error("Event instruction budget exceeded");
+        if (command_index_ < commands_.size() || !call_frames_.empty()) throw std::runtime_error("Event instruction budget exceeded");
         commands_.clear(); command_index_ = 0; autorun_pending_ = true;
     } catch (const std::exception& e) { error_ = e.what(); commands_.clear(); message_.clear(); message_queue_.clear(); }
 }
@@ -349,8 +517,10 @@ void GameSession::execute() {
 void GameSession::update(double seconds) {
     if (!std::isfinite(seconds)) return;
     seconds = std::clamp(seconds, 0.0, 0.1);
+    if(scene_!=GameScene::Map)return;
+    play_seconds_+=seconds;
     if (moving()) {
-        progress_ = std::min(1.0, progress_ + seconds * 3.75);
+        progress_ = std::min(1.0, progress_ + seconds * ((dashing_||always_dash_)?7.5:3.75));
         if (!moving()) {
             from_x_ = target_x_ = x_; from_y_ = target_y_ = y_;
             trigger_at(x_,y_,1,false);
@@ -358,6 +528,11 @@ void GameSession::update(double seconds) {
         }
     }
     if (wait_ > 0) { wait_ = std::max(0.0, wait_-seconds); if (wait_ == 0) execute(); }
+    else if(!commands_.empty()&&message_.empty()&&!choosing())execute();
+    if(menu_requested_&&!moving()) {
+        menu_requested_=false;
+        if(message_.empty()&&commands_.empty()&&menu_enabled_){set_scene(GameScene::Menu);return;}
+    }
     check_autorun();
 }
 } // namespace rpg2lx

@@ -25,8 +25,8 @@ def main():
     env['ZIG_GLOBAL_CACHE_DIR']=str(ROOT/'build/zig-cache')
     env['ZIG_LOCAL_CACHE_DIR']=str(ROOT/'build/zig-arm-local')
     sources=['src/core/inspector.cpp','src/mv/map.cpp','src/mv/project_source.cpp',
-             'src/mv/session.cpp','src/mv/tile_layout.cpp','src/launcher/library.cpp',
-             'src/launcher/model.cpp','src/launcher/frontend.cpp','src/render/map_view.cpp',
+             'src/mv/session.cpp','src/mv/game_state.cpp','src/mv/tile_layout.cpp','src/launcher/library.cpp',
+             'src/launcher/model.cpp','src/launcher/frontend.cpp','src/launcher/library_view.cpp','src/render/map_view.cpp',
              'src/cli/main.cpp']
     binary=out/'rpg2lx.aarch64'
     command=[str(compiler),'c++','-target','aarch64-linux-gnu.2.28','-mcpu=cortex_a35',
