@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rpg2lx/font_renderer.hpp"
+#include "rpg2lx/project_source.hpp"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -116,7 +117,7 @@ inline std::shared_ptr<DecodedImage> decode_project_image(const fs::path& projec
     const std::string rel = url_decode_rel(raw_url);
     if (rel.empty() || rel.find("..") != std::string::npos) return nullptr;
 
-    fs::path full = project_root / fs::u8path(rel);
+    fs::path full = find_project_file(project_root, rel);
     std::error_code ec;
     bool encrypted = false;
 
@@ -125,8 +126,8 @@ inline std::shared_ptr<DecodedImage> decode_project_image(const fs::path& projec
     if (ext == ".rpgmvp") {
         encrypted = true;
     } else if (!fs::exists(full, ec)) {
-        fs::path alt = full;
-        alt.replace_extension(".rpgmvp");
+        const fs::path alt = find_project_file(
+            project_root, fs::u8path(rel).replace_extension(".rpgmvp").u8string());
         if (fs::exists(alt, ec)) {
             full = alt;
             encrypted = true;

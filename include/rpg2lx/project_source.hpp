@@ -17,4 +17,8 @@ struct ProjectSourceResult {
 // Resolve an existing MV editor/export directory, www/, index.html or Game.exe.
 // This is read-only: no import, conversion, patching or script execution.
 ProjectSourceResult resolve_mv_project(const std::filesystem::path& input);
+// root / rel, matching each component case-insensitively when the exact spelling does not exist.
+// MV games are authored on Windows, where "img/Pictures/Hero.PNG" and "img/pictures/hero.png"
+// are the same file; on the handheld's Linux filesystem they are not.
+std::filesystem::path find_project_file(const std::filesystem::path& root, const std::string& rel);
 } // namespace rpg2lx

@@ -1,4 +1,5 @@
 #include "rpg2lx/mv_audio.hpp"
+#include "rpg2lx/project_source.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -259,20 +260,18 @@ struct MvAudioEngine::Impl {
         auto asset = std::make_shared<CachedAudioAsset>();
 
         // Try exact path, .ogg, .rpgmvo
-        fs::path base = project_root / fs::u8path(norm);
-        std::vector<fs::path> candidates = {base};
-        const std::string ext = base.extension().u8string();
+        const fs::path base = fs::u8path(norm);
+        std::vector<fs::path> candidates = {find_project_file(project_root, norm)};
+        std::string ext = base.extension().u8string();
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        auto variant = [&](const char* extension) {
+            candidates.push_back(find_project_file(project_root, fs::path(base).replace_extension(extension).u8string()));
+        };
         if (ext == ".ogg" || ext == ".m4a") {
-            fs::path stem_p = base;
-            stem_p.replace_extension(".ogg");
-            candidates.push_back(stem_p);
-            fs::path enc_p = base;
-            enc_p.replace_extension(".rpgmvo");
-            candidates.push_back(enc_p);
+            variant(".ogg");
+            variant(".rpgmvo");
         } else if (ext == ".rpgmvo" || ext == ".rpgmvm") {
-            fs::path ogg_p = base;
-            ogg_p.replace_extension(".ogg");
-            candidates.push_back(ogg_p);
+            variant(".ogg");
         }
 
         fs::path chosen;

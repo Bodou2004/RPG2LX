@@ -432,15 +432,8 @@ struct LibraryView::Impl {
                     put_text("CARPETA INCOMPLETA", kRightX + 20, kRightY + 238, kWarningColor, 1, 20);
                 }
 
-                if (selected->detected) {
-                    const Engine engine = resolve_engine(model.home(), selected->id);
-                    const std::string engine_text = std::string("Motor: ") +
-                        engine_preference_label(load_engine_preference(model.home(), selected->id)) +
-                        (engine == Engine::Browser ? " (navegador)" : " (nativo)");
-                    put_text(engine_text, kRightX + 12, kRightY + 266, kInkBright, 1, 34);
-                    if (native_failed_last_time(model.home(), selected->id))
-                        put_text("El motor nativo fallo la ultima vez", kRightX + 12, kRightY + 286, kWarningColor, 1, 36);
-                }
+                if (selected->detected)
+                    put_text("Btn inferior: abrir", kRightX + 12, kRightY + 266, kInkBright, 1, 34);
 
                 if (!model.message().empty()) {
                     put_wrapped(model.message(), kRightX + 12, kRightY + 308, kWarningColor, 32, 2, 1);
@@ -457,7 +450,7 @@ struct LibraryView::Impl {
         // "Btn inf." / "Btn der." name the face buttons by position, as A/B differ between devices.
         const char* hints = "Btn inf.: abrir  Select: controles  R1: recargar  Btn der.: salir";
         if (model.screen() == HubScreen::GameMenu)
-            hints = "Btn inf.: aceptar  Izq/Der: motor  Start: jugar  Btn der.: volver";
+            hints = "Btn inf.: aceptar  Start: jugar  Btn der.: volver";
         else if (model.screen() == HubScreen::Controls)
             hints = "Izq/Der: tecla  Pulsa un boton: su fila  Btn der.: guardar";
         put_text(hints, 14, 454, kInkBright, 1, 78);
@@ -488,13 +481,8 @@ struct LibraryView::Impl {
     void draw_game_menu(const LauncherModel& model, const GameEntry& game) {
         constexpr int x = 120, y = 110, w = 400, h = 250;
         draw_panel(x, y, w, h, game.title);
-        const Engine engine = resolve_engine(model.home(), game.id);
-        std::string engine_value = engine_preference_label(model.engine_preference());
-        if (model.engine_preference() == EnginePreference::Auto)
-            engine_value += engine == Engine::Browser ? ": navegador" : ": nativo";
         const std::array<std::pair<std::string, std::string>, kGameMenuCount> rows{{
             {"Jugar", ""},
-            {"Motor", engine_value},
             {"Controles de este juego", ""},
             {"Usar controles globales", ""},
             {"Volver", ""},
@@ -502,13 +490,6 @@ struct LibraryView::Impl {
         for (std::size_t i = 0; i < rows.size(); ++i)
             draw_row(x + 10, y + 42 + static_cast<int>(i) * 30, w - 20, i == model.menu_index(),
                      rows[i].first, rows[i].second);
-        const bool browser_missing = !model.browser_available();
-        std::string note = engine == Engine::Browser
-            ? "Navegador: Chromium real, maxima compatibilidad."
-            : "Nativo: rapido y ligero, 60 FPS.";
-        if (browser_missing && model.engine_preference() == EnginePreference::Browser)
-            note = "Falta NW.js en la carpeta nwjs/.";
-        put_text(note, x + 22, y + 200, browser_missing && engine == Engine::Browser ? kWarningColor : kInmMuted, 1, 46);
         if (!model.message().empty()) put_text(model.message(), x + 22, y + 222, kWarningColor, 1, 46);
     }
 

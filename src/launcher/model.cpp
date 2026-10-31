@@ -4,80 +4,8 @@
 #include "rpg2lx/project_source.hpp"
 #include <algorithm>
 #include <cstdint>
-#include <fstream>
 
 namespace rpg2lx {
-namespace {
-
-std::filesystem::path game_config_dir(const std::filesystem::path& home, const std::string& game_id) {
-    return home / "config" / "games" / std::filesystem::u8path(game_id);
-}
-
-std::string read_first_line(const std::filesystem::path& file) {
-    std::ifstream in(file);
-    std::string line;
-    std::getline(in, line);
-    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-    return line;
-}
-
-bool write_line(const std::filesystem::path& file, const std::string& text) {
-    std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::ofstream out(file, std::ios::trunc);
-    out << text << '\n';
-    return static_cast<bool>(out);
-}
-
-} // namespace
-
-const char* engine_preference_label(EnginePreference preference) {
-    switch (preference) {
-        case EnginePreference::Native: return "Nativo";
-        case EnginePreference::Browser: return "Navegador";
-        default: return "Auto";
-    }
-}
-
-EnginePreference load_engine_preference(const std::filesystem::path& home, const std::string& game_id) {
-    const auto value = read_first_line(game_config_dir(home, game_id) / "engine.txt");
-    if (value == "native") return EnginePreference::Native;
-    if (value == "browser") return EnginePreference::Browser;
-    return EnginePreference::Auto;
-}
-
-bool save_engine_preference(const std::filesystem::path& home, const std::string& game_id, EnginePreference preference) {
-    const char* value = preference == EnginePreference::Native ? "native"
-                      : preference == EnginePreference::Browser ? "browser" : "auto";
-    return write_line(game_config_dir(home, game_id) / "engine.txt", value);
-}
-
-bool native_failed_last_time(const std::filesystem::path& home, const std::string& game_id) {
-    return read_first_line(game_config_dir(home, game_id) / "native_result.txt") == "failed";
-}
-
-void record_run_result(const std::filesystem::path& home, const std::string& game_id, Engine engine, int status) {
-    // Only native results matter for Auto; a browser failure says nothing about native support.
-    if (engine != Engine::Native) return;
-    write_line(game_config_dir(home, game_id) / "native_result.txt", status == 0 ? "ok" : "failed");
-}
-
-bool browser_engine_installed(const std::filesystem::path& home) {
-    std::error_code ec;
-    return std::filesystem::is_regular_file(home / "nwjs" / "nw", ec) ||
-           std::filesystem::is_regular_file(home / "nwjs" / "nw.exe", ec);
-}
-
-Engine resolve_engine(const std::filesystem::path& home, const std::string& game_id) {
-    switch (load_engine_preference(home, game_id)) {
-        case EnginePreference::Native: return Engine::Native;
-        case EnginePreference::Browser: return Engine::Browser;
-        default:
-            return native_failed_last_time(home, game_id) && browser_engine_installed(home)
-                       ? Engine::Browser : Engine::Native;
-    }
-}
-
 LauncherModel::LauncherModel(GameLibrary& library) : library_(library) { refresh(); }
 
 const GameEntry* LauncherModel::selected() const {
@@ -165,24 +93,15 @@ void LauncherModel::play_selected() {
         Logger::error(message_);
         return;
     }
-    const Engine engine = resolve_engine(library_.home(), game->id);
-    if (engine == Engine::Browser && !browser_engine_installed(library_.home())) {
-        message_ = "Motor navegador no instalado (carpeta nwjs/).";
-        return;
-    }
-    if (engine == Engine::Native && !MvEngine::is_supported_project(game->project)) {
+    if (!MvEngine::is_supported_project(game->project)) {
         message_ = "Faltan js/rpg_*.js: este juego no se puede ejecutar.";
         if (!hub_mode_) open_project(game->project);
         return;
     }
     if (hub_mode_) {
         const auto resolved = resolve_mv_project(game->project);
-        launch_request_ = LaunchRequest{engine, resolved ? resolved.source->root : game->project, game->id};
+        launch_request_ = LaunchRequest{resolved ? resolved.source->root : game->project, game->id};
         quit_ = true;
-        return;
-    }
-    if (engine == Engine::Browser) {
-        message_ = "El modo navegador solo funciona desde PortMaster.";
         return;
     }
     open_project(game->project);
@@ -260,13 +179,7 @@ void LauncherModel::act(MenuAction action) {
         else if (action == MenuAction::Down) menu_index_ = (menu_index_ + 1) % kGameMenuCount;
         else if (action == MenuAction::Back) { screen_ = HubScreen::Library; message_.clear(); }
         else if (action == MenuAction::Play) play_selected();
-        else if (item == GameMenuItem::Engine &&
-                 (action == MenuAction::Left || action == MenuAction::Right || action == MenuAction::Confirm)) {
-            const int step = action == MenuAction::Left ? 2 : 1;
-            engine_preference_ = static_cast<EnginePreference>((static_cast<int>(engine_preference_) + step) % 3);
-            save_engine_preference(library_.home(), game->id, engine_preference_);
-            message_.clear();
-        } else if (action == MenuAction::Confirm) {
+        else if (action == MenuAction::Confirm) {
             switch (item) {
                 case GameMenuItem::Play: play_selected(); break;
                 case GameMenuItem::GameControls: open_controls(game->id); break;
@@ -303,7 +216,6 @@ void LauncherModel::act(MenuAction action) {
     }
     screen_ = HubScreen::GameMenu;
     menu_index_ = 0;
-    engine_preference_ = load_engine_preference(library_.home(), selected()->id);
     message_.clear();
 }
 } // namespace rpg2lx

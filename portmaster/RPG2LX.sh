@@ -2,7 +2,7 @@
 
 # PortMaster launcher for RPG2LX.
 # The HUB and every game run as separate processes: the HUB writes a launch request and
-# exits, this script runs the chosen engine, then reopens the HUB. A crashing game can
+# exits, this script runs the game, then reopens the HUB. A crashing game can
 # never take the HUB down, and each game starts with all memory free.
 # Lifecycle reference: https://portmaster.games/packaging.html
 
@@ -36,18 +36,7 @@ REQUEST="$CONFDIR/launch.request"
 mkdir -p "$CONFDIR" "$GAMEDIR/games" "$GAMEDIR/saves" "$GAMEDIR/logs" || exit 1
 cd "$GAMEDIR" || exit 1
 
-weston_dir=/tmp/weston
-weston_runtime="weston_pkg_0.2"
-weston_mounted=0
-
-cleanup() {
-    if [ "$weston_mounted" = 1 ]; then
-        $ESUDO "$weston_dir/westonwrap.sh" cleanup
-        [ "${PM_CAN_MOUNT:-Y}" != "N" ] && $ESUDO umount "$weston_dir"
-    fi
-    pm_finish
-}
-trap cleanup EXIT
+trap pm_finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -79,60 +68,6 @@ request_value() {
     sed -n "s/^$1=//p" "$REQUEST" | head -n 1
 }
 
-# Mounts PortMaster's Westonpack runtime, which provides X11/Wayland on every CFW.
-mount_weston() {
-    [ "$weston_mounted" = 1 ] && return 0
-    if [ ! -f "$controlfolder/libs/${weston_runtime}.squashfs" ]; then
-        if [ ! -f "$controlfolder/harbourmaster" ]; then
-            pm_message "Instala la ultima version de PortMaster para usar el modo navegador."
-            sleep 5
-            return 1
-        fi
-        $ESUDO "$controlfolder/harbourmaster" --quiet --no-check runtime_check "${weston_runtime}.squashfs"
-    fi
-    $ESUDO mkdir -p "$weston_dir"
-    [ "${PM_CAN_MOUNT:-Y}" != "N" ] && $ESUDO umount "$weston_dir" 2>/dev/null
-    $ESUDO mount "$controlfolder/libs/${weston_runtime}.squashfs" "$weston_dir" || return 1
-    weston_mounted=1
-}
-
-# Browser engine: real Chromium (NW.js) for games whose plugins the native engine can't run.
-run_browser() {
-    local project="$1" game_id="$2"
-    local nw="$GAMEDIR/nwjs/nw"
-    if [ ! -f "$nw" ]; then
-        echo "ERROR: NW.js not installed in $GAMEDIR/nwjs (see docs/ENGINES.md)"
-        return 2
-    fi
-    # Copying to the SD from Windows drops exec bits.
-    while read -r exe; do
-        [ -n "$exe" ] && chmod +x "$GAMEDIR/nwjs/$exe" 2>/dev/null
-    done < "$GAMEDIR/nwjs/EXECUTABLES.txt"
-    local app="$CONFDIR/games/$game_id/nwapp"
-    mkdir -p "$app" "$CONFDIR/games/$game_id/chromium"
-    # Wrapper app: the game folder is never modified (an empty package.json "name" breaks NW.js).
-    cat > "$app/package.json" <<EOF
-{
-  "name": "rpg2lx-game",
-  "main": "file://$project/index.html",
-  "window": { "fullscreen": true, "frame": false, "kiosk": true },
-  "chromium-args": "--disable-background-timer-throttling --disable-renderer-backgrounding --ignore-gpu-blocklist --enable-gpu-rasterization --disk-cache-size=8388608 --js-flags=--max-old-space-size=384 --user-data-dir=$CONFDIR/games/$game_id/chromium"
-}
-EOF
-    local gptk="$CONFDIR/games/$game_id/browser.gptk"
-    "$BIN" export-gptk --home "$GAMEDIR" --game-id "$game_id" --output "$gptk" || return 2
-
-    mount_weston || return 2
-    $GPTOKEYB "nw" -c "$gptk" &
-    local mode="${RPG2LX_WESTON_MODE:-headless noop kiosk crusty_x11egl}"
-    # shellcheck disable=SC2086
-    $ESUDO env "$weston_dir/westonwrap.sh" $mode \
-        XDG_DATA_HOME="$CONFDIR" "$nw" "$app"
-    local status=$?
-    pm_gptokeyb_finish 2>/dev/null || $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
-    return $status
-}
-
 STATUS=0
 while true; do
     rm -f "$REQUEST"
@@ -142,19 +77,11 @@ while true; do
     if [ "$STATUS" -ne 10 ] || [ ! -f "$REQUEST" ]; then
         break
     fi
-    engine="$(request_value engine)"
     project="$(request_value project)"
     game_id="$(request_value id)"
-    echo "--- Launch: $game_id ($engine) $(date) ---"
-    if [ "$engine" = "browser" ]; then
-        run_browser "$project" "$game_id"
-    else
-        "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"
-    fi
-    game_status=$?
-    echo "--- Game ended: $game_id status $game_status ---"
-    # Lets the HUB offer the browser engine next time a native run crashed.
-    "$BIN" record-result --home "$GAMEDIR" --game-id "$game_id" --engine "$engine" --status "$game_status"
+    echo "--- Launch: $game_id $(date) ---"
+    "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"
+    echo "--- Game ended: $game_id status $? ---"
 done
 
 echo "=== RPG2LX session ended: $(date) ==="

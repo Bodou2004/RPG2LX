@@ -113,8 +113,7 @@ bool write_launch_request(const std::filesystem::path& file, const rpg2lx::Launc
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::trunc);
-    out << "engine=" << (request.engine == rpg2lx::Engine::Browser ? "browser" : "native") << '\n'
-        << "project=" << request.project.u8string() << '\n'
+    out << "project=" << request.project.u8string() << '\n'
         << "id=" << request.id << '\n';
     return static_cast<bool>(out);
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rpg2lx VERSION 0.6.0 LANGUAGES C CXX)
+project(rpg2lx VERSION 0.7.0 LANGUAGES C CXX)
 option(RPG2LX_WITH_SDL "Build the graphical game library menu and SDL2 MV renderer" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -39,6 +39,7 @@ target_include_directories(rpg2lx_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quickjs"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/font8x8"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/canvas_ity"
 )
 target_include_directories(rpg2lx_core SYSTEM PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"

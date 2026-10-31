@@ -1,4 +1,5 @@
 #include "rpg2lx/launcher.hpp"
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -63,19 +64,7 @@ int main(int argc, char** argv) {
         require(model.selected()->id == "Adventure One", "Navigation order");
         model.act(rpg2lx::MenuAction::Confirm);
         require(model.details() && model.screen() == rpg2lx::HubScreen::GameMenu, "Confirm opens the game menu");
-        model.act(rpg2lx::MenuAction::Down);
-        model.act(rpg2lx::MenuAction::Right);
-        require(model.engine_preference() == rpg2lx::EnginePreference::Native, "Engine cycles Auto -> Native");
-        require(rpg2lx::load_engine_preference(library.home(), "Adventure One") == rpg2lx::EnginePreference::Native,
-                "Engine preference persisted");
-        model.act(rpg2lx::MenuAction::Left);
-        require(model.engine_preference() == rpg2lx::EnginePreference::Auto, "Engine cycles back to Auto");
-        rpg2lx::record_run_result(library.home(), "Adventure One", rpg2lx::Engine::Native, 3);
-        require(rpg2lx::native_failed_last_time(library.home(), "Adventure One"), "Native crash recorded");
-        require(rpg2lx::resolve_engine(library.home(), "Adventure One") == rpg2lx::Engine::Native,
-                "Auto stays native when the browser engine is missing");
         model.set_hub_mode(true);
-        model.act(rpg2lx::MenuAction::Up);
         model.act(rpg2lx::MenuAction::Confirm);
         require(!model.launch_request() && !model.quit() && model.message().find("js/rpg_") != std::string::npos,
                 "Games without corescripts are refused instead of launched");
@@ -96,11 +85,16 @@ int main(int argc, char** argv) {
         {
             using rpg2lx::PadButton;
             auto profile = rpg2lx::ControlProfile::defaults();
-            require(profile.key_code(PadButton::South) == 13 && profile.key_code(PadButton::East) == 27 &&
-                    profile.key_code(PadButton::L1) == 33, "Default MV keyboard layout");
+            const auto& actions = rpg2lx::mv_action_names();
+            auto action_code = [&](const char* name) {
+                return -static_cast<int>(std::find(actions.begin(), actions.end(), name) - actions.begin()) - 1;
+            };
+            require(profile.key_code(PadButton::South) == action_code("ok") &&
+                    profile.key_code(PadButton::East) == action_code("escape") &&
+                    profile.key_code(PadButton::L1) == action_code("pageup"), "Default MV actions");
             profile.cycle(PadButton::South, 1);
             const int changed = profile.key_code(PadButton::South);
-            require(changed != 13, "Cycling changes the key");
+            require(changed != action_code("ok"), "Cycling changes the key");
             profile.cycle(PadButton::R3, -1);
             require(profile.key_code(PadButton::R3) == rpg2lx::key_table().back().key_code, "Cycle wraps backwards");
             profile.cycle(PadButton::R3, 1);
@@ -109,15 +103,8 @@ int main(int argc, char** argv) {
             require(profile.save(file, error), error);
             const auto loaded = rpg2lx::load_effective_profile(library.home(), "Adventure Two");
             require(loaded.key_code(PadButton::South) == changed, "Per-game profile round-trips");
-            require(rpg2lx::load_effective_profile(library.home(), "Other").key_code(PadButton::South) == 13,
+            require(rpg2lx::load_effective_profile(library.home(), "Other").key_code(PadButton::South) == action_code("ok"),
                     "Other games keep the global profile");
-            const auto gptk = library.home() / "test.gptk";
-            require(loaded.write_gptk(gptk, error), error);
-            std::ifstream in(gptk);
-            const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-            require(text.find("l1 = pageup") != std::string::npos && text.find("b = esc") != std::string::npos,
-                    "gptokeyb export");
-
             model.refresh();
             model.act(rpg2lx::MenuAction::OpenControls);
             require(model.screen() == rpg2lx::HubScreen::Controls && model.editing_global_controls(), "Global controls editor");
@@ -127,7 +114,7 @@ int main(int argc, char** argv) {
             model.act(rpg2lx::MenuAction::Back);
             require(model.screen() == rpg2lx::HubScreen::Library &&
                     fs::is_regular_file(rpg2lx::global_controls_file(library.home())), "Leaving the editor saves");
-            require(rpg2lx::load_effective_profile(library.home(), "Other").key_code(PadButton::L1) != 33,
+            require(rpg2lx::load_effective_profile(library.home(), "Other").key_code(PadButton::L1) != action_code("pageup"),
                     "Global change applies to games without their own profile");
         }
 

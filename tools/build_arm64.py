@@ -77,6 +77,7 @@ def main():
         '-I', str(ROOT / 'include'),
         '-I', str(ROOT / 'third_party/quickjs'),
         '-I', str(ROOT / 'third_party/font8x8'),
+        '-I', str(ROOT / 'third_party/canvas_ity'),
         '-isystem', str(ROOT / 'third_party/stb'),
         '-isystem', str(sdk / 'usr/include/SDL2'),
         '-isystem', str(sdk / 'usr/include/aarch64-linux-gnu'),

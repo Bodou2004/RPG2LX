@@ -10,6 +10,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -234,6 +235,29 @@ void test_real_mv_project(SDL_Renderer* renderer, const fs::path& mv_root) {
     engine.set_key(65, false);
     step_frames(engine, 1);
     require(js("Input.isPressed('pagedown')") == "false", "Key release must reach Input");
+
+    // 5c. Canvas 2D paths, strokes, transforms and gradients (plugins draw their UI this way)
+    const std::string canvas = js(
+        "(function(){ var b = new Bitmap(40, 40), c = b._context;"
+        " c.beginPath(); c.arc(20, 20, 10, 0, Math.PI * 2); c.fillStyle = '#ff0000'; c.fill();"
+        " c.lineWidth = 4; c.strokeStyle = '#00ff00'; c.beginPath(); c.moveTo(0, 1); c.lineTo(39, 1); c.stroke();"
+        " c.save(); c.translate(30, 30); c.rotate(Math.PI / 4); c.fillStyle = '#0000ff'; c.fillRect(-2, -2, 4, 4); c.restore();"
+        " var g = c.createLinearGradient(0, 0, 0, 10); g.addColorStop(0, '#000000'); g.addColorStop(1, '#ffffff');"
+        " c.fillStyle = g; c.fillRect(0, 30, 4, 10);"
+        " var px = function(x, y) { return Array.prototype.slice.call(c.getImageData(x, y, 1, 1).data).join(','); };"
+        " return [px(20, 20), px(10, 1), px(30, 30), px(20, 5), px(1, 38)].join('|'); })()");
+    std::cout << "  [MV] Canvas 2D pixels: " << canvas << "\n";
+    const auto parts = [&] {
+        std::vector<std::string> out;
+        std::stringstream ss(canvas);
+        for (std::string item; std::getline(ss, item, '|');) out.push_back(item);
+        return out;
+    }();
+    require(parts.size() == 5 && parts[0] == "255,0,0,255", "arc + fill must paint the circle");
+    require(parts[1] == "0,255,0,255", "moveTo/lineTo + stroke must paint the line");
+    require(parts[2] == "0,0,255,255", "rotated fillRect must paint through the transform");
+    require(parts[3].substr(parts[3].size() - 2) == ",0", "outside every shape stays transparent");
+    require(parts[4] != "0,0,0,0" && parts[4].rfind("0,0,0,", 0) != 0, "gradient fill reaches its light end");
 
     // 6. Benchmark 120 Scene_Map frames for 60 FPS verification
     const auto t0 = std::chrono::steady_clock::now();

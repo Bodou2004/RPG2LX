@@ -8,16 +8,15 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 
-# Mock binary: logs every call; the first two "hub" calls request a game (native, then
-# browser), the third quits. "run" exits 7 to check that results are recorded.
+# Mock binary: logs every call; the first two "hub" calls request a game, the third quits.
+# "run" exits 7: a failing game must still return to the HUB.
 MOCK='''#!/bin/bash
 (IFS='|'; printf '%s\\n' "$*") >> "$TEST_OUTPUT/calls"
 case "$1" in
 hub)
     n=$(cat "$TEST_OUTPUT/hubs" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$TEST_OUTPUT/hubs"
     request="$5"
-    if [ "$n" = 1 ]; then printf 'engine=native\\nproject=/games/My Game\\nid=My Game\\n' > "$request"; exit 10; fi
-    if [ "$n" = 2 ]; then printf 'engine=browser\\nproject=/games/My Game\\nid=My Game\\n' > "$request"; exit 10; fi
+    if [ "$n" -le 2 ]; then printf 'project=/games/My Game\\nid=My Game\\n' > "$request"; exit 10; fi
     exit 0 ;;
 run) exit 7 ;;
 *) exit 0 ;;
@@ -59,10 +58,8 @@ pm_finish() { printf 'finished' > "$TEST_OUTPUT/cleanup"; }
         expected=[
             f'hub|--home|{home}|--request|{request}',
             f'run|/games/My Game|--home|{home}|--game-id|My Game',
-            f'record-result|--home|{home}|--game-id|My Game|--engine|native|--status|7',
             f'hub|--home|{home}|--request|{request}',
-            # Browser engine without nwjs/: refused before export or launch, still recorded.
-            f'record-result|--home|{home}|--game-id|My Game|--engine|browser|--status|2',
+            f'run|/games/My Game|--home|{home}|--game-id|My Game',
             f'hub|--home|{home}|--request|{request}',
         ]
         calls=(base/'calls').read_text().splitlines()

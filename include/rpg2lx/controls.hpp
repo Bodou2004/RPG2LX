@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace rpg2lx {
 
@@ -18,18 +19,21 @@ enum class PadButton : std::size_t {
 };
 inline constexpr std::size_t kPadButtonCount = static_cast<std::size_t>(PadButton::Count);
 
-// One emulated keyboard key: DOM keyCode (what MV and its plugins read) and gptokeyb name.
+// What a button sends. Positive codes are DOM keyCodes (a real key). Negative codes are MV
+// actions ("ok", "escape"...): the engine presses whichever key the game's Input.keyMapper
+// assigns to that action, so games that remap their keyboard (J = ok, WASD...) just work.
 struct KeyInfo {
-    const char* label;
+    std::string label;
     int key_code;
-    const char* gptk;
+    std::string id; // stored in controls.ini
 };
 
-const std::array<KeyInfo, 34>& key_table();
+const std::vector<KeyInfo>& key_table();
 const char* pad_button_label(PadButton button);
-const char* pad_button_gptk(PadButton button);
-// Index in key_table() of the key with this DOM keyCode, or -1.
+// Index in key_table() of the entry with this code, or -1.
 int key_index_for_code(int key_code);
+// MV action names, indexed by -code - 1 (code -1 is "ok").
+const std::vector<std::string>& mv_action_names();
 
 // Button -> key profile. key_index < 0 means "unassigned".
 struct ControlProfile {
@@ -41,8 +45,6 @@ struct ControlProfile {
 
     bool load(const std::filesystem::path& file, std::string& error);
     bool save(const std::filesystem::path& file, std::string& error) const;
-    // gptokeyb mapping used when a game runs inside the browser engine.
-    bool write_gptk(const std::filesystem::path& file, std::string& error) const;
 };
 
 // Global profile lives in config/controls.ini; a game may override it in

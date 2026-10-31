@@ -59,7 +59,7 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
             var batch = __asyncQueue.splice(0, __asyncQueue.length);
             for (var i = 0; i < batch.length; i++) {
                 try { batch[i](); } catch (e) {
-                    __rpg2lx.reportError(e && e.stack ? String(e.stack) : String(e));
+                    __rpg2lx.reportError(global.__errorText(e));
                 }
             }
         }
@@ -75,7 +75,7 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
                     tm.active = false;
                 }
                 try { tm.fn(); } catch (e) {
-                    __rpg2lx.reportError(e && e.stack ? String(e.stack) : String(e));
+                    __rpg2lx.reportError(global.__errorText(e));
                 }
             }
         }
@@ -124,7 +124,7 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
                     if (typeof snapshot[i] === 'function') snapshot[i].call(target, event);
                     else snapshot[i].handleEvent(event);
                 } catch (e) {
-                    __rpg2lx.reportError(e && e.stack ? String(e.stack) : String(e));
+                    __rpg2lx.reportError(global.__errorText(e));
                 }
             }
             return !event.defaultPrevented;
@@ -507,115 +507,293 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
         return canvas;
     };
 
+    // Full CanvasRenderingContext2D. Axis-aligned rects, images and text without a transform or
+    // clip take the existing fast native paths; everything else (paths, strokes, gradients,
+    // patterns, transforms, clipping) is rasterised by canvas_ity through __rpg2lx.bmpCanvasOp.
+    var PATH_MOVE = 0, PATH_LINE = 1, PATH_QUAD = 2, PATH_BEZIER = 3, PATH_ARC = 4, PATH_ARCTO = 5,
+        PATH_RECT = 6, PATH_CLOSE = 7, PATH_ELLIPSE = 8;
+    var FAST_OPS = { 'source-over': 1, 'lighter': 1, 'destination-out': 1, 'copy': 1, 'difference': 1, 'multiply': 1, 'screen': 1 };
+
+    function CanvasGradient(kind, x0, y0, r0, x1, y1, r1) {
+        this.__kind = kind;
+        this.x0 = +x0 || 0; this.y0 = +y0 || 0; this.r0 = +r0 || 0;
+        this.x1 = +x1 || 0; this.y1 = +y1 || 0; this.r1 = +r1 || 0;
+        this.stops = [];
+    }
+    CanvasGradient.prototype.addColorStop = function(offset, color) {
+        this.stops.push({ offset: +offset, color: String(color) });
+        this.stops.sort(function(a, b) { return a.offset - b.offset; });
+    };
+    function CanvasPattern(ref, repetition) {
+        this.__kind = 'pattern';
+        this.ref = ref;
+        this.repetition = repetition || 'repeat';
+    }
+    CanvasPattern.prototype.setTransform = function() {};
+    global.CanvasGradient = CanvasGradient;
+    global.CanvasPattern = CanvasPattern;
+
+    function Path2D(source) {
+        this._cmds = source && source._cmds ? source._cmds.slice() : [];
+        this._m = [1, 0, 0, 1, 0, 0];
+    }
+    global.Path2D = Path2D;
+
+    function multiply(m, a, b, c, d, e, f) {
+        return [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d,
+                m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]];
+    }
+    function isIdentity(m) { return m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1; }
+    function finite() { for (var i = 0; i < arguments.length; i++) if (!isFinite(arguments[i])) return false; return true; }
+
+    // Path recording shared by the context and Path2D: [cmd, args..., matrix(6)].
+    var pathMethods = {
+        _push: function(cmd, args) {
+            for (var i = 0; i < args.length; i++) if (!isFinite(args[i])) return;
+            var c = this._cmds, m = this._m;
+            c.push(cmd);
+            for (var j = 0; j < args.length; j++) c.push(+args[j]);
+            c.push(m[0], m[1], m[2], m[3], m[4], m[5]);
+        },
+        moveTo: function(x, y) { this._push(PATH_MOVE, [x, y]); },
+        lineTo: function(x, y) { this._push(PATH_LINE, [x, y]); },
+        quadraticCurveTo: function(cx, cy, x, y) { this._push(PATH_QUAD, [cx, cy, x, y]); },
+        bezierCurveTo: function(a, b, c, d, x, y) { this._push(PATH_BEZIER, [a, b, c, d, x, y]); },
+        arc: function(x, y, r, a0, a1, ccw) { this._push(PATH_ARC, [x, y, r, a0, a1, ccw ? 1 : 0]); },
+        arcTo: function(x1, y1, x2, y2, r) { this._push(PATH_ARCTO, [x1, y1, x2, y2, r]); },
+        rect: function(x, y, w, h) { this._push(PATH_RECT, [x, y, w, h]); },
+        roundRect: function(x, y, w, h, radii) {
+            var r = Array.isArray(radii) ? (radii[0] || 0) : (+radii || 0);
+            r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
+            this.moveTo(x + r, y);
+            this.arcTo(x + w, y, x + w, y + h, r);
+            this.arcTo(x + w, y + h, x, y + h, r);
+            this.arcTo(x, y + h, x, y, r);
+            this.arcTo(x, y, x + w, y, r);
+            this.closePath();
+        },
+        ellipse: function(x, y, rx, ry, rot, a0, a1, ccw) { this._push(PATH_ELLIPSE, [x, y, rx, ry, rot, a0, a1, ccw ? 1 : 0]); },
+        closePath: function() { this._push(PATH_CLOSE, []); },
+        addPath: function(p) { if (p && p._cmds) for (var i = 0; i < p._cmds.length; i++) this._cmds.push(p._cmds[i]); }
+    };
+    for (var pk in pathMethods) Path2D.prototype[pk] = pathMethods[pk];
+
     function make2DContext(canvas) {
         var stack = [];
         var ctx = {
             canvas: canvas,
-            font: '28px GameFont',
-            textAlign: 'left',
+            font: '10px sans-serif',
+            textAlign: 'start',
             textBaseline: 'alphabetic',
-            fillStyle: '#ffffff',
-            strokeStyle: 'rgba(0,0,0,0.5)',
-            lineWidth: 4,
-            lineJoin: 'round',
+            direction: 'ltr',
+            fillStyle: '#000000',
+            strokeStyle: '#000000',
+            lineWidth: 1,
+            lineCap: 'butt',
+            lineJoin: 'miter',
+            miterLimit: 10,
+            lineDashOffset: 0,
             globalAlpha: 1.0,
             globalCompositeOperation: 'source-over',
-            _arc: null,
+            shadowColor: 'rgba(0, 0, 0, 0)',
+            shadowBlur: 0,
+            shadowOffsetX: 0,
+            shadowOffsetY: 0,
+            imageSmoothingEnabled: true,
+            imageSmoothingQuality: 'low',
+            filter: 'none',
+            _cmds: [],
+            _m: [1, 0, 0, 1, 0, 0],
+            _dash: [],
+            _clips: [],
+
             save: function() {
                 stack.push({
                     font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline,
                     fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth,
-                    globalAlpha: this.globalAlpha, globalCompositeOperation: this.globalCompositeOperation
+                    lineCap: this.lineCap, lineJoin: this.lineJoin, miterLimit: this.miterLimit,
+                    lineDashOffset: this.lineDashOffset, _dash: this._dash.slice(),
+                    globalAlpha: this.globalAlpha, globalCompositeOperation: this.globalCompositeOperation,
+                    shadowColor: this.shadowColor, shadowBlur: this.shadowBlur,
+                    shadowOffsetX: this.shadowOffsetX, shadowOffsetY: this.shadowOffsetY,
+                    imageSmoothingEnabled: this.imageSmoothingEnabled, filter: this.filter,
+                    _m: this._m.slice(), _clips: this._clips.slice()
                 });
             },
             restore: function() {
                 var st = stack.pop();
-                if (st) {
-                    this.font = st.font; this.textAlign = st.textAlign; this.textBaseline = st.textBaseline;
-                    this.fillStyle = st.fillStyle; this.strokeStyle = st.strokeStyle; this.lineWidth = st.lineWidth;
-                    this.globalAlpha = st.globalAlpha; this.globalCompositeOperation = st.globalCompositeOperation;
-                }
+                if (st) for (var k in st) this[k] = st[k];
             },
-            scale: function() {},
-            translate: function() {},
-            rotate: function() {},
-            setTransform: function() {},
-            clearRect: function(x, y, w, h) {
-                __rpg2lx.bmpClearRect(canvas._nbmpRef, x, y, w, h);
+            reset: function() { stack.length = 0; this.resetTransform(); this._clips = []; this._cmds = []; this.clearRect(0, 0, canvas.width, canvas.height); },
+
+            // Transforms
+            scale: function(x, y) { if (finite(x, y)) this._m = multiply(this._m, x, 0, 0, y, 0, 0); },
+            rotate: function(a) { if (finite(a)) { var c = Math.cos(a), s = Math.sin(a); this._m = multiply(this._m, c, s, -s, c, 0, 0); } },
+            translate: function(x, y) { if (finite(x, y)) this._m = multiply(this._m, 1, 0, 0, 1, x, y); },
+            transform: function(a, b, c, d, e, f) { if (finite(a, b, c, d, e, f)) this._m = multiply(this._m, a, b, c, d, e, f); },
+            setTransform: function(a, b, c, d, e, f) {
+                if (a && typeof a === 'object') { var t = a; a = t.a; b = t.b; c = t.c; d = t.d; e = t.e; f = t.f; }
+                if (a === undefined) { this._m = [1, 0, 0, 1, 0, 0]; return; }
+                if (finite(a, b, c, d, e, f)) this._m = [+a, +b, +c, +d, +e, +f];
+            },
+            resetTransform: function() { this._m = [1, 0, 0, 1, 0, 0]; },
+            getTransform: function() { var m = this._m; return { a: m[0], b: m[1], c: m[2], d: m[3], e: m[4], f: m[5], is2D: true, isIdentity: isIdentity(m) && !m[4] && !m[5] }; },
+
+            // Line style
+            setLineDash: function(d) {
+                if (!Array.isArray(d)) return;
+                for (var i = 0; i < d.length; i++) if (!isFinite(d[i]) || d[i] < 0) return;
+                this._dash = d.length % 2 ? d.concat(d) : d.slice();
+            },
+            getLineDash: function() { return this._dash.slice(); },
+
+            // Paint styles
+            createLinearGradient: function(x0, y0, x1, y1) { return new CanvasGradient('linear', x0, y0, 0, x1, y1, 0); },
+            createRadialGradient: function(x0, y0, r0, x1, y1, r1) { return new CanvasGradient('radial', x0, y0, r0, x1, y1, r1); },
+            createConicGradient: function(a, x, y) { return new CanvasGradient('radial', x, y, 0, x, y, 1); },
+            createPattern: function(image, repetition) {
+                var ref = image && (image._nbmpRef || (image._canvas && image._canvas._nbmpRef) || (image._image && image._image._nbmpRef));
+                return ref ? new CanvasPattern(ref, repetition) : null;
+            },
+
+            beginPath: function() { this._cmds = []; },
+            fill: function(a) {
+                var path = a && a._cmds ? a : this;
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 0, new Float64Array(path._cmds).buffer, this._clips, this);
+            },
+            stroke: function(p) {
+                var path = p && p._cmds ? p : this;
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 1, new Float64Array(path._cmds).buffer, this._clips, this);
+            },
+            clip: function(a) {
+                var path = a && a._cmds ? a : this;
+                this._clips = this._clips.concat([new Float64Array(path._cmds).buffer]);
+            },
+            isPointInPath: function(a, b, c) {
+                var path = a && a._cmds ? a : this, x = a && a._cmds ? b : a, y = a && a._cmds ? c : b;
+                return __rpg2lx.pointInPath(new Float64Array(path._cmds).buffer, x, y);
+            },
+            isPointInStroke: function() { return false; },
+
+            _simple: function() {
+                return isIdentity(this._m) && this._clips.length === 0 && FAST_OPS[this.globalCompositeOperation] &&
+                       !(this.shadowBlur > 0 || this.shadowOffsetX || this.shadowOffsetY);
+            },
+            _opacity: function() { return Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255); },
+            _rectPath: function(x, y, w, h) {
+                var m = this._m;
+                return new Float64Array([PATH_RECT, x, y, w, h, m[0], m[1], m[2], m[3], m[4], m[5]]).buffer;
             },
             fillRect: function(x, y, w, h) {
+                if (!finite(x, y, w, h) || !w || !h) return;
                 var fs = this.fillStyle;
-                var op = Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255);
-                if (fs && fs.__isGrad) {
-                    __rpg2lx.bmpGradientFillRect(canvas._nbmpRef, x, y, w, h, fs.c0, fs.c1, fs.vertical, op);
-                } else {
-                    __rpg2lx.bmpFillRect(canvas._nbmpRef, x, y, w, h, String(fs || '#ffffff'), op, String(this.globalCompositeOperation || 'source-over'));
+                if (this._simple() && typeof fs === 'string') {
+                    if (w < 0) { x += w; w = -w; }
+                    if (h < 0) { y += h; h = -h; }
+                    __rpg2lx.bmpFillRect(canvas._nbmpRef, x + this._m[4], y + this._m[5], w, h, fs, this._opacity(), String(this.globalCompositeOperation));
+                    return;
                 }
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 0, this._rectPath(x, y, w, h), this._clips, this);
             },
-            strokeRect: function() {},
-            createLinearGradient: function(x0, y0, x1, y1) {
-                return {
-                    __isGrad: true,
-                    vertical: Math.abs(y1 - y0) >= Math.abs(x1 - x0),
-                    c0: '#000000',
-                    c1: '#ffffff',
-                    addColorStop: function(stop, col) {
-                        if (stop <= 0.5) this.c0 = String(col);
-                        else this.c1 = String(col);
-                    }
-                };
+            strokeRect: function(x, y, w, h) {
+                if (!finite(x, y, w, h)) return;
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 1, this._rectPath(x, y, w, h), this._clips, this);
             },
-            beginPath: function() { this._arc = null; },
-            arc: function(x, y, r) { this._arc = { x: x, y: y, r: r }; },
-            fill: function() {
-                if (this._arc) {
-                    var op = Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255);
-                    __rpg2lx.bmpDrawCircle(canvas._nbmpRef, this._arc.x, this._arc.y, this._arc.r, String(this.fillStyle || '#ffffff'), op);
+            clearRect: function(x, y, w, h) {
+                if (!finite(x, y, w, h) || !w || !h) return;
+                if (isIdentity(this._m) && this._clips.length === 0) {
+                    if (w < 0) { x += w; w = -w; }
+                    if (h < 0) { y += h; h = -h; }
+                    __rpg2lx.bmpClearRect(canvas._nbmpRef, x + this._m[4], y + this._m[5], w, h);
+                    return;
                 }
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 3, this._rectPath(x, y, w, h), this._clips, this);
             },
-            stroke: function() {},
-            clip: function() {},
             drawImage: function(src, a, b, c, d, e, f, g, h) {
-                var srcRef = src && src._nbmpRef;
+                var srcRef = src && (src._nbmpRef || (src._canvas && src._canvas._nbmpRef) || (src._image && src._image._nbmpRef));
                 if (!srcRef) return;
-                var op = Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255);
-                var sw = __rpg2lx.bmpWidth(srcRef), sh = __rpg2lx.bmpHeight(srcRef);
-                if (arguments.length === 3) {
-                    __rpg2lx.bmpBlt(canvas._nbmpRef, srcRef, 0, 0, sw, sh, a, b, sw, sh, op, this.globalCompositeOperation);
-                } else if (arguments.length === 5) {
-                    __rpg2lx.bmpBlt(canvas._nbmpRef, srcRef, 0, 0, sw, sh, a, b, c, d, op, this.globalCompositeOperation);
-                } else if (arguments.length >= 9) {
-                    __rpg2lx.bmpBlt(canvas._nbmpRef, srcRef, a, b, c, d, e, f, g, h, op, this.globalCompositeOperation);
+                var iw = __rpg2lx.bmpWidth(srcRef), ih = __rpg2lx.bmpHeight(srcRef);
+                var sx = 0, sy = 0, sw = iw, sh = ih, dx, dy, dw, dh;
+                if (arguments.length >= 9) { sx = a; sy = b; sw = c; sh = d; dx = e; dy = f; dw = g; dh = h; }
+                else if (arguments.length >= 5) { dx = a; dy = b; dw = c; dh = d; }
+                else { dx = a; dy = b; dw = iw; dh = ih; }
+                if (!finite(sx, sy, sw, sh, dx, dy, dw, dh) || !sw || !sh || !dw || !dh) return;
+                if (sw < 0) { sx += sw; sw = -sw; }
+                if (sh < 0) { sy += sh; sh = -sh; }
+                if (dw < 0) { dx += dw; dw = -dw; }
+                if (dh < 0) { dy += dh; dh = -dh; }
+                if (this._simple()) {
+                    __rpg2lx.bmpBlt(canvas._nbmpRef, srcRef, sx, sy, sw, sh, dx + this._m[4], dy + this._m[5], dw, dh,
+                                    this._opacity(), this.globalCompositeOperation);
+                    return;
                 }
+                __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 2, new ArrayBuffer(0), this._clips, this,
+                    { ref: srcRef, sx: sx, sy: sy, sw: sw, sh: sh, dx: dx, dy: dy, dw: dw, dh: dh });
             },
+
+            // Text (native TrueType renderer; translation and uniform scale apply, rotation does not)
             measureText: function(text) {
                 var fp = parseFontSpec(this.font);
-                return { width: __rpg2lx.measureText(String(text === undefined ? '' : text), fp.size, fp.italic) };
+                var w = __rpg2lx.measureText(String(text === undefined ? '' : text), fp.size, fp.italic);
+                return { width: w, actualBoundingBoxLeft: 0, actualBoundingBoxRight: w,
+                         actualBoundingBoxAscent: fp.size * 0.8, actualBoundingBoxDescent: fp.size * 0.2,
+                         fontBoundingBoxAscent: fp.size * 0.8, fontBoundingBoxDescent: fp.size * 0.2 };
             },
-            strokeText: function(text, tx, ty, maxW) {
+            _text: function(text, tx, ty, maxW, fill, stroke, width) {
                 var fp = parseFontSpec(this.font);
-                var op = Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255);
-                __rpg2lx.bmpCanvasText(canvas._nbmpRef, String(text === undefined ? '' : text), tx, ty,
-                    maxW || 0, String(this.textAlign || 'left'), fp.size, fp.italic,
-                    'transparent', String(this.strokeStyle || 'rgba(0,0,0,0.5)'), Math.max(1, Math.round(this.lineWidth || 4)), op);
+                var align = this.textAlign === 'start' ? 'left' : this.textAlign === 'end' ? 'right' : this.textAlign;
+                var size = fp.size * Math.sqrt(Math.abs(this._m[0] * this._m[3] - this._m[1] * this._m[2]));
+                var px = this._m[0] * tx + this._m[2] * ty + this._m[4], py = this._m[1] * tx + this._m[3] * ty + this._m[5];
+                // MV positions text on an alphabetic baseline; adjust the others.
+                if (this.textBaseline === 'top' || this.textBaseline === 'hanging') py += size * 0.8;
+                else if (this.textBaseline === 'middle') py += size * 0.3;
+                else if (this.textBaseline === 'bottom' || this.textBaseline === 'ideographic') py -= size * 0.2;
+                __rpg2lx.bmpCanvasText(canvas._nbmpRef, String(text === undefined ? '' : text), px, py,
+                    maxW || 0, String(align || 'left'), Math.round(size) || fp.size, fp.italic, fill, stroke, width, this._opacity());
             },
             fillText: function(text, tx, ty, maxW) {
-                var fp = parseFontSpec(this.font);
-                var op = Math.round(Math.max(0, Math.min(1, this.globalAlpha)) * 255);
-                __rpg2lx.bmpCanvasText(canvas._nbmpRef, String(text === undefined ? '' : text), tx, ty,
-                    maxW || 0, String(this.textAlign || 'left'), fp.size, fp.italic,
-                    String(this.fillStyle || '#ffffff'), 'transparent', 0, op);
+                var fs = this.fillStyle;
+                if (typeof fs !== 'string') fs = fs && fs.stops && fs.stops.length ? fs.stops[0].color : '#ffffff';
+                this._text(text, tx, ty, maxW, fs, 'transparent', 0);
+            },
+            strokeText: function(text, tx, ty, maxW) {
+                var ss = this.strokeStyle;
+                if (typeof ss !== 'string') ss = ss && ss.stops && ss.stops.length ? ss.stops[0].color : '#000000';
+                this._text(text, tx, ty, maxW, 'transparent', ss, Math.max(1, Math.round(this.lineWidth || 1)));
+            },
+
+            createImageData: function(w, h) {
+                if (w && w.width) { h = w.height; w = w.width; }
+                var iw = Math.max(1, Math.abs(w | 0)), ih = Math.max(1, Math.abs(h | 0));
+                return { width: iw, height: ih, data: new Uint8ClampedArray(iw * ih * 4), colorSpace: 'srgb' };
             },
             getImageData: function(x, y, w, h) {
-                var iw = Math.max(1, w | 0), ih = Math.max(1, h | 0);
+                var iw = Math.max(1, Math.abs(w | 0)), ih = Math.max(1, Math.abs(h | 0));
                 var ab = __rpg2lx.bmpGetPixels(canvas._nbmpRef, x | 0, y | 0, iw, ih);
-                return { width: iw, height: ih, data: new Uint8ClampedArray(ab) };
+                return { width: iw, height: ih, data: new Uint8ClampedArray(ab), colorSpace: 'srgb' };
             },
-            putImageData: function(imgData, dx, dy) {
+            putImageData: function(imgData, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) {
                 if (!imgData || !imgData.data) return;
-                __rpg2lx.bmpPutPixels(canvas._nbmpRef, dx | 0, dy | 0, imgData.width | 0, imgData.height | 0, imgData.data.buffer);
-            }
+                var data = imgData.data, w = imgData.width | 0, h = imgData.height | 0;
+                if (dirtyW !== undefined) {
+                    var x0 = Math.max(0, dirtyX | 0), y0 = Math.max(0, dirtyY | 0);
+                    var x1 = Math.min(w, x0 + (dirtyW | 0)), y1 = Math.min(h, y0 + (dirtyH | 0));
+                    if (x1 <= x0 || y1 <= y0) return;
+                    var sub = new Uint8ClampedArray((x1 - x0) * (y1 - y0) * 4);
+                    for (var row = y0; row < y1; row++)
+                        sub.set(data.subarray((row * w + x0) * 4, (row * w + x1) * 4), (row - y0) * (x1 - x0) * 4);
+                    __rpg2lx.bmpPutPixels(canvas._nbmpRef, (dx | 0) + x0, (dy | 0) + y0, x1 - x0, y1 - y0, sub.buffer);
+                    return;
+                }
+                var buf = data.byteOffset === 0 && data.byteLength === data.buffer.byteLength ? data.buffer : data.slice().buffer;
+                __rpg2lx.bmpPutPixels(canvas._nbmpRef, dx | 0, dy | 0, w, h, buf);
+            },
+            getContextAttributes: function() { return { alpha: true, desynchronized: false, colorSpace: 'srgb', willReadFrequently: false }; },
+            isContextLost: function() { return false; },
+            drawFocusIfNeeded: function() {},
+            scrollPathIntoView: function() {}
         };
+        for (var k in pathMethods) ctx[k] = pathMethods[k];
         return ctx;
     }
 
@@ -1372,7 +1550,7 @@ inline constexpr const char* kMvPostManagersPatchJs = R"JS(
             SceneManager.renderScene();
             SceneManager.tickEnd();
         } catch (e) {
-            __rpg2lx.reportError(e && e.stack ? String(e.stack) : String(e));
+            __rpg2lx.reportError(global.__errorText(e));
             SceneManager.stop();
         }
     };
@@ -1394,7 +1572,40 @@ inline constexpr const char* kMvPostManagersPatchJs = R"JS(
     var __keyNames = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Control', 18: 'Alt',
         27: 'Escape', 32: ' ', 33: 'PageUp', 34: 'PageDown', 37: 'ArrowLeft', 38: 'ArrowUp',
         39: 'ArrowRight', 40: 'ArrowDown', 45: 'Insert', 46: 'Delete' };
+    // Pad buttons bound to an MV action (negative codes) press whichever key the game's current
+    // Input.keyMapper assigns to it; the key used is remembered so the release matches.
+    var __actionNames = ['ok', 'escape', 'menu', 'shift', 'pageup', 'pagedown', 'up', 'down', 'left', 'right', 'control', 'tab'];
+    var __preferredKeys = { ok: [13, 32, 90], escape: [27, 88, 45, 96], menu: [27, 88], shift: [16],
+        pageup: [33, 81], pagedown: [34, 87], up: [38, 104], down: [40, 98], left: [37, 100], right: [39, 102],
+        control: [17, 18], tab: [9] };
+    var __heldActions = {};
+    function __keyForAction(name) {
+        var mapper = (typeof Input !== 'undefined' && Input.keyMapper) || {};
+        var prefer = __preferredKeys[name] || [];
+        for (var i = 0; i < prefer.length; i++) if (mapper[prefer[i]] === name) return prefer[i];
+        var codes = Object.keys(mapper).map(Number).sort(function(a, b) { return a - b; });
+        for (var j = 0; j < codes.length; j++) if (mapper[codes[j]] === name) return codes[j];
+        // MV treats escape as menu-compatible: a game without a "menu" key opens it with escape.
+        if (name === 'menu') return __keyForAction('escape');
+        return 0;
+    }
     global.__rpg2lxKey = function(keyCode, pressed) {
+        if (keyCode < 0) {
+            var action = __actionNames[-keyCode - 1];
+            if (!action) return;
+            if (pressed) {
+                var code = __keyForAction(action);
+                __heldActions[keyCode] = code;
+                if (code) global.__rpg2lxKey(code, true);
+                else if (typeof Input !== 'undefined') Input._currentState[action] = true; // like a gamepad button
+            } else {
+                var held = __heldActions[keyCode];
+                delete __heldActions[keyCode];
+                if (held) global.__rpg2lxKey(held, false);
+                else if (typeof Input !== 'undefined') Input._currentState[action] = false;
+            }
+            return;
+        }
         var name = __keyNames[keyCode];
         if (!name) {
             if (keyCode >= 112 && keyCode <= 123) name = 'F' + (keyCode - 111);

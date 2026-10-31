@@ -53,6 +53,7 @@ def main():
         "-I", str(ROOT / "include"),
         "-I", str(ROOT / "third_party/quickjs"),
         "-I", str(ROOT / "third_party/font8x8"),
+        "-I", str(ROOT / "third_party/canvas_ity"),
         "-isystem", str(ROOT / "third_party/stb"),
     ]
     flags += ["-O2", "-DNDEBUG"] if args.release else ["-O0", "-g"]
@@ -146,6 +147,10 @@ def main():
             ],
             "test_mv_engine": [
                 *core, "tests/test_mv_engine.cpp", str(sdl_dll_a),
+            ],
+            # Development probe: drives a real game from a script (not run by the suite).
+            "mv_probe": [
+                *core, "tests/mv_probe.cpp", str(sdl_dll_a),
             ],
         }
         for name, sources in sdl_targets.items():

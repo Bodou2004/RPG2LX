@@ -1,6 +1,9 @@
 #include "rpg2lx/mv_engine.hpp"
 
 #include "mv_bitmap_ops.hpp"
+#include "mv_browser_compat.hpp"
+#define CANVAS_ITY_IMPLEMENTATION
+#include "mv_canvas2d.hpp"
 #include "mv_js_bridge.hpp"
 #include "mv_scene_renderer.hpp"
 #include "rpg2lx/font_renderer.hpp"
@@ -170,6 +173,11 @@ struct MvEngine::Impl {
         std::string p = raw;
         for (char& c : p) if (c == '\\') c = '/';
         if (p.find("..") != std::string::npos) return false;
+        // Plugins build absolute paths from process.mainModule.filename / process.cwd(), which the
+        // JS shim reports as the virtual "/game" directory (optionally as a file:// URL).
+        if (p.rfind("file://", 0) == 0) p.erase(0, 7);
+        if (p == "/game") p = "/";
+        else if (p.rfind("/game/", 0) == 0) p.erase(0, 5);
 
         static constexpr const char* kSavePrefix = "/__rpg2lx_saves__/";
         if (p.rfind(kSavePrefix, 0) == 0) {
@@ -210,7 +218,7 @@ struct MvEngine::Impl {
             out_path = in_save;
             return true;
         }
-        out_path = project_root / fs::u8path(rel);
+        out_path = find_project_file(project_root, rel);
         return true;
     }
 
@@ -240,7 +248,7 @@ struct MvEngine::Impl {
             return false;
         }
         std::string code;
-        if (!read_utf8_file(project_root / fs::u8path(rel), code)) {
+        if (!read_utf8_file(find_project_file(project_root, rel), code)) {
             error = "Missing script file: " + rel;
             return false;
         }
@@ -337,7 +345,10 @@ JSValue cb_load_script_sync(JSContext* ctx, JSValueConst, int argc, JSValueConst
     std::string err;
     if (!im->eval_project_script(src, err)) {
         std::cerr << "[MV Plugin] " << err << '\n';
-        return JS_FALSE;
+        // Browser semantics: only a missing file fires the <script> error event. A script that
+        // throws while running is reported, and the page (every other plugin) keeps loading.
+        return err.rfind("Missing script file", 0) == 0 || err.rfind("Invalid script path", 0) == 0
+                   ? JS_FALSE : JS_TRUE;
     }
     return JS_TRUE;
 }
@@ -348,7 +359,7 @@ JSValue cb_read_project_text(JSContext* ctx, JSValueConst, int argc, JSValueCons
     const std::string rel = url_decode_rel(js_to_std_string(ctx, argv[0]));
     if (rel.empty() || rel.find("..") != std::string::npos) return JS_NULL;
     std::string txt;
-    if (!read_utf8_file(im->project_root / fs::u8path(rel), txt)) return JS_NULL;
+    if (!read_utf8_file(find_project_file(im->project_root, rel), txt)) return JS_NULL;
     return JS_NewStringLen(ctx, txt.data(), txt.size());
 }
 
@@ -358,7 +369,7 @@ JSValue cb_read_project_bytes(JSContext* ctx, JSValueConst, int argc, JSValueCon
     const std::string rel = url_decode_rel(js_to_std_string(ctx, argv[0]));
     if (rel.empty() || rel.find("..") != std::string::npos) return JS_NULL;
     std::vector<std::uint8_t> bytes;
-    if (!read_binary_file(im->project_root / fs::u8path(rel), bytes)) return JS_NULL;
+    if (!read_binary_file(find_project_file(im->project_root, rel), bytes)) return JS_NULL;
     return JS_NewArrayBufferCopy(ctx, bytes.data(), bytes.size());
 }
 
@@ -708,6 +719,175 @@ JSValue cb_bmp_canvas_text(JSContext* ctx, JSValueConst, int argc, JSValueConst*
     return JS_UNDEFINED;
 }
 
+double js_number(JSContext* ctx, JSValueConst obj, const char* name, double fallback) {
+    JSValue v = JS_GetPropertyStr(ctx, obj, name);
+    double out = fallback;
+    if (JS_IsNumber(v)) JS_ToFloat64(ctx, &out, v);
+    JS_FreeValue(ctx, v);
+    return std::isfinite(out) ? out : fallback;
+}
+
+std::string js_string(JSContext* ctx, JSValueConst obj, const char* name, const char* fallback) {
+    JSValue v = JS_GetPropertyStr(ctx, obj, name);
+    std::string out = JS_IsUndefined(v) || JS_IsNull(v) ? std::string(fallback) : js_to_std_string(ctx, v);
+    JS_FreeValue(ctx, v);
+    return out;
+}
+
+std::vector<double> js_number_array(JSContext* ctx, JSValueConst value) {
+    std::vector<double> out;
+    size_t bytes = 0;
+    if (uint8_t* buf = JS_GetArrayBuffer(ctx, &bytes, value)) {
+        out.resize(bytes / sizeof(double));
+        std::memcpy(out.data(), buf, out.size() * sizeof(double));
+        return out;
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx)); // not an ArrayBuffer: read it as a plain array
+    JSValue len_v = JS_GetPropertyStr(ctx, value, "length");
+    int32_t len = 0;
+    JS_ToInt32(ctx, &len, len_v);
+    JS_FreeValue(ctx, len_v);
+    out.reserve(static_cast<std::size_t>(std::max(0, len)));
+    for (int32_t i = 0; i < len; ++i) {
+        JSValue item = JS_GetPropertyUint32(ctx, value, static_cast<uint32_t>(i));
+        double d = 0;
+        JS_ToFloat64(ctx, &d, item);
+        JS_FreeValue(ctx, item);
+        out.push_back(d);
+    }
+    return out;
+}
+
+void read_matrix(JSContext* ctx, JSValueConst obj, const char* name, double* m) {
+    JSValue v = JS_GetPropertyStr(ctx, obj, name);
+    if (JS_IsObject(v)) {
+        const auto values = js_number_array(ctx, v);
+        if (values.size() >= 6) std::copy(values.begin(), values.begin() + 6, m);
+    }
+    JS_FreeValue(ctx, v);
+}
+
+// fillStyle/strokeStyle: a CSS color string, or a gradient/pattern object made by the 2D context shim.
+mv_detail::Canvas2DStyle read_canvas_style(MvEngine::Impl* im, JSContext* ctx, JSValueConst style) {
+    mv_detail::Canvas2DStyle s;
+    if (!JS_IsObject(style)) {
+        s.color = parse_css_color(js_to_std_string(ctx, style), {0, 0, 0, 255});
+        return s;
+    }
+    const std::string kind = js_string(ctx, style, "__kind", "");
+    if (kind == "pattern") {
+        JSValue ref = JS_GetPropertyStr(ctx, style, "ref");
+        s.kind = mv_detail::Canvas2DStyle::Pattern;
+        s.pattern = im->unwrap_bitmap(ref);
+        JS_FreeValue(ctx, ref);
+        const std::string rep = js_string(ctx, style, "repetition", "repeat");
+        s.repetition = rep == "repeat-x" ? canvas_ity::repeat_x : rep == "repeat-y" ? canvas_ity::repeat_y
+                     : rep == "no-repeat" ? canvas_ity::no_repeat : canvas_ity::repeat;
+        if (!s.pattern) { s.kind = mv_detail::Canvas2DStyle::Color; s.color = {0, 0, 0, 0}; }
+        return s;
+    }
+    s.kind = kind == "radial" ? mv_detail::Canvas2DStyle::Radial : mv_detail::Canvas2DStyle::Linear;
+    s.x0 = js_number(ctx, style, "x0", 0); s.y0 = js_number(ctx, style, "y0", 0); s.r0 = js_number(ctx, style, "r0", 0);
+    s.x1 = js_number(ctx, style, "x1", 0); s.y1 = js_number(ctx, style, "y1", 0); s.r1 = js_number(ctx, style, "r1", 0);
+    JSValue stops = JS_GetPropertyStr(ctx, style, "stops");
+    JSValue len_v = JS_GetPropertyStr(ctx, stops, "length");
+    int32_t len = 0;
+    JS_ToInt32(ctx, &len, len_v);
+    JS_FreeValue(ctx, len_v);
+    for (int32_t i = 0; i < len; ++i) {
+        JSValue stop = JS_GetPropertyUint32(ctx, stops, static_cast<uint32_t>(i));
+        s.stops.emplace_back(js_number(ctx, stop, "offset", 0),
+                             parse_css_color(js_string(ctx, stop, "color", "#000"), {0, 0, 0, 255}));
+        JS_FreeValue(ctx, stop);
+    }
+    JS_FreeValue(ctx, stops);
+    return s;
+}
+
+// __rpg2lx.bmpCanvasOp(ref, mode, path, clips, state[, image])
+// mode: 0 fill, 1 stroke, 2 drawImage, 3 clear. path/clips use the mv_canvas2d.hpp encoding.
+JSValue cb_bmp_canvas_op(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* im = get_impl(ctx);
+    if (!im || argc < 5) return JS_UNDEFINED;
+    NativeBitmap* nb = im->unwrap_bitmap(argv[0]);
+    if (!nb) return JS_UNDEFINED;
+    int32_t mode_i = 0;
+    JS_ToInt32(ctx, &mode_i, argv[1]);
+    const auto path = js_number_array(ctx, argv[2]);
+
+    std::vector<std::vector<double>> clips;
+    JSValue clip_len_v = JS_GetPropertyStr(ctx, argv[3], "length");
+    int32_t clip_len = 0;
+    JS_ToInt32(ctx, &clip_len, clip_len_v);
+    JS_FreeValue(ctx, clip_len_v);
+    for (int32_t i = 0; i < clip_len; ++i) {
+        JSValue clip = JS_GetPropertyUint32(ctx, argv[3], static_cast<uint32_t>(i));
+        clips.push_back(js_number_array(ctx, clip));
+        JS_FreeValue(ctx, clip);
+    }
+
+    JSValueConst state = argv[4];
+    mv_detail::Canvas2DState st;
+    read_matrix(ctx, state, "matrix", st.matrix);
+    st.global_alpha = js_number(ctx, state, "globalAlpha", 1.0);
+    st.composite = js_string(ctx, state, "globalCompositeOperation", "source-over");
+    st.line_width = js_number(ctx, state, "lineWidth", 1.0);
+    const std::string cap = js_string(ctx, state, "lineCap", "butt");
+    st.line_cap = cap == "round" ? canvas_ity::circle : cap == "square" ? canvas_ity::square : canvas_ity::butt;
+    const std::string join = js_string(ctx, state, "lineJoin", "miter");
+    st.line_join = join == "round" ? canvas_ity::rounded : join == "bevel" ? canvas_ity::bevel : canvas_ity::miter;
+    st.miter_limit = js_number(ctx, state, "miterLimit", 10.0);
+    st.dash_offset = js_number(ctx, state, "lineDashOffset", 0.0);
+    JSValue dash = JS_GetPropertyStr(ctx, state, "_dash");
+    if (JS_IsObject(dash)) for (double d : js_number_array(ctx, dash)) st.dash.push_back(static_cast<float>(d));
+    JS_FreeValue(ctx, dash);
+    st.shadow_color = parse_css_color(js_string(ctx, state, "shadowColor", "rgba(0,0,0,0)"), {0, 0, 0, 0});
+    st.shadow_blur = js_number(ctx, state, "shadowBlur", 0);
+    st.shadow_x = js_number(ctx, state, "shadowOffsetX", 0);
+    st.shadow_y = js_number(ctx, state, "shadowOffsetY", 0);
+
+    const auto mode = static_cast<mv_detail::Canvas2DMode>(std::clamp(mode_i, 0, 3));
+    if (mode == mv_detail::Canvas2DMode::Fill || mode == mv_detail::Canvas2DMode::Stroke) {
+        JSValue style = JS_GetPropertyStr(ctx, state, mode == mv_detail::Canvas2DMode::Fill ? "fillStyle" : "strokeStyle");
+        st.style = read_canvas_style(im, ctx, style);
+        // Gradients and patterns use the transform active when fill/stroke is called.
+        std::copy(st.matrix, st.matrix + 6, st.style.matrix);
+        JS_FreeValue(ctx, style);
+    }
+
+    mv_detail::Canvas2DImage image;
+    if (mode == mv_detail::Canvas2DMode::Image) {
+        if (argc < 6) return JS_UNDEFINED;
+        JSValue src = JS_GetPropertyStr(ctx, argv[5], "ref");
+        image.source = im->unwrap_bitmap(src);
+        JS_FreeValue(ctx, src);
+        if (!image.source || image.source == nb) return JS_UNDEFINED;
+        image.sx = js_number(ctx, argv[5], "sx", 0); image.sy = js_number(ctx, argv[5], "sy", 0);
+        image.sw = js_number(ctx, argv[5], "sw", image.source->width); image.sh = js_number(ctx, argv[5], "sh", image.source->height);
+        image.dx = js_number(ctx, argv[5], "dx", 0); image.dy = js_number(ctx, argv[5], "dy", 0);
+        image.dw = js_number(ctx, argv[5], "dw", image.sw); image.dh = js_number(ctx, argv[5], "dh", image.sh);
+    }
+    mv_detail::canvas2d_draw(*nb, mode, path, clips, st, image);
+    return JS_UNDEFINED;
+}
+
+// __rpg2lx.bmpPointInPath(path, x, y): hit test in canvas coordinates.
+JSValue cb_point_in_path(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 3) return JS_FALSE;
+    const auto path = js_number_array(ctx, argv[0]);
+    double x = 0, y = 0;
+    JS_ToFloat64(ctx, &x, argv[1]);
+    JS_ToFloat64(ctx, &y, argv[2]);
+    auto box = mv_detail::canvas2d_impl::path_bounds(path);
+    if (box.empty() || x < box.x0 || y < box.y0 || x > box.x1 || y > box.y1) return JS_FALSE;
+    const int w = std::max(1, static_cast<int>(std::ceil(box.x1 - box.x0)) + 2);
+    const int h = std::max(1, static_cast<int>(std::ceil(box.y1 - box.y0)) + 2);
+    canvas_ity::canvas c(w, h);
+    mv_detail::canvas2d_impl::replay(c, path, box.x0 - 1, box.y0 - 1);
+    c.set_transform(1, 0, 0, 1, 0, 0);
+    return JS_NewBool(ctx, c.is_point_in_path(static_cast<float>(x - box.x0 + 1), static_cast<float>(y - box.y0 + 1)));
+}
+
 JSValue cb_measure_text(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* im = get_impl(ctx);
     if (!im || argc < 1) return JS_NewInt32(ctx, 0);
@@ -1021,6 +1201,8 @@ const BridgeFunc kRpg2lxFuncs[] = {
     {"bmpDrawText", 13, cb_bmp_draw_text},
     {"bmpCanvasText", 12, cb_bmp_canvas_text},
     {"measureText", 3, cb_measure_text},
+    {"bmpCanvasOp", 6, cb_bmp_canvas_op},
+    {"pointInPath", 3, cb_point_in_path},
     {"bmpGetPixelHex", 3, cb_bmp_get_pixel_hex},
     {"bmpGetAlpha", 3, cb_bmp_get_alpha},
     {"bmpGetPixels", 5, cb_bmp_get_pixels},
@@ -1167,7 +1349,8 @@ bool MvEngine::boot(const fs::path& project_path,
     JS_FreeValue(impl_->ctx, global);
 
     // 1. Pre-core DOM / Canvas / PIXI / NW.js bootstrap
-    if (!impl_->eval_code(kMvPreCoreBootstrapJs, "<mv_pre_core>", error)) {
+    if (!impl_->eval_code(kMvPreCoreBootstrapJs, "<mv_pre_core>", error) ||
+        !impl_->eval_code(kMvBrowserCompatJs, "<mv_browser_compat>", error)) {
         impl_->shutdown();
         return false;
     }
@@ -1198,7 +1381,8 @@ bool MvEngine::boot(const fs::path& project_path,
 
     // 4. Load unmodified rpg_managers.js + StorageManager/SceneManager/Input hooks
     if (!impl_->eval_project_script("js/rpg_managers.js", error) ||
-        !impl_->eval_code(kMvPostManagersPatchJs, "<mv_post_managers>", error)) {
+        !impl_->eval_code(kMvPostManagersPatchJs, "<mv_post_managers>", error) ||
+        !impl_->eval_code(kMvExportedModeJs, "<mv_exported_mode>", error)) {
         impl_->shutdown();
         return false;
     }

@@ -2,22 +2,16 @@
 
 Runtime 1:1 portable para proyectos RPG Maker MV, diseñado para consolas de bolsillo Linux ARM64 (R36S / Rockchip RK3326 y compatibles) y distribución mediante PortMaster.
 
-## Estado (`0.6.0`)
+## Estado (`0.7.0`)
 
-HUB para PortMaster con dos motores por juego:
-
-- **Nativo:** QuickJS + SDL2. Ejecuta los `js/rpg_*.js` y plugins originales del juego. Ligero.
-- **Navegador:** NW.js (Chromium real) dentro del runtime Westonpack de PortMaster, para plugins que el nativo no soporta.
-- **Auto** (por defecto): nativo; si falla, la próxima vez usa el navegador.
-
-El HUB y cada juego corren en procesos separados: si un juego se cae, se vuelve al HUB. Lo comprobado y lo pendiente está en [STATUS.md](docs/STATUS.md); los motores, en [ENGINES.md](docs/ENGINES.md).
+HUB para PortMaster con un motor nativo (QuickJS + SDL2) que ejecuta los `js/rpg_*.js` y los plugins originales del juego, sin modificarlos, como un juego exportado (sin modo de prueba). Incluye un Canvas 2D completo, DOM, APIs de navegador y módulos de Node/NW.js para los plugins. El HUB y cada juego corren en procesos separados. Detalle, lo comprobado y lo pendiente en [STATUS.md](docs/STATUS.md).
 
 ## Controles
 
 Los botones se nombran por posición, porque A/B cambian según la consola.
 
 - **HUB:** cruceta/stick elegir · botón inferior abrir/aceptar · botón derecho volver/salir · Select controles globales · R1 recargar · Start (en el menú del juego) jugar.
-- **En el juego:** cada botón emula una tecla y se configura en el HUB (global o por juego). Por defecto: inferior=Enter, derecho=Escape, izquierdo=Shift, superior=X, Start=Escape, Select=Tab, L1/R1=RePag/AvPag, L2=Ctrl, R2=Alt, cruceta/stick=flechas. Las teclas pasan por `Input.keyMapper`, así que se respetan los botones internos de MV y los que añadan los plugins.
+- **En el juego:** cada botón envía una acción de MV o una tecla, configurable en el HUB (global o por juego, antes de entrar). Por defecto: inferior=[Aceptar], derecho=[Cancelar], izquierdo=[Correr], superior y Start=[Menú], Select=[Tab], L1/R1=[Pág. anterior/siguiente], L2=[Control], cruceta/stick=direcciones. Una acción pulsa la tecla que el propio juego asigna, así que funciona aunque un plugin cambie el teclado.
 - **Select + Start:** cerrar el juego y volver al HUB.
 
 ## Uso

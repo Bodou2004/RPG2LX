@@ -3,38 +3,55 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iterator>
+#include <utility>
 #include <system_error>
 
 namespace rpg2lx {
 namespace {
 
-constexpr std::array<KeyInfo, 34> kKeys{{
-    {"Enter", 13, "enter"},       {"Escape", 27, "esc"},        {"Espacio", 32, "space"},
-    {"Shift", 16, "leftshift"},   {"Ctrl", 17, "leftctrl"},     {"Alt", 18, "leftalt"},
-    {"Tab", 9, "tab"},            {"Retroceso", 8, "backspace"},{"RePag", 33, "pageup"},
-    {"AvPag", 34, "pagedown"},    {"Arriba", 38, "up"},         {"Abajo", 40, "down"},
-    {"Izquierda", 37, "left"},    {"Derecha", 39, "right"},     {"Insert", 45, "insert"},
-    {"Z", 90, "z"}, {"X", 88, "x"}, {"C", 67, "c"}, {"V", 86, "v"}, {"A", 65, "a"},
-    {"S", 83, "s"}, {"D", 68, "d"}, {"Q", 81, "q"}, {"W", 87, "w"}, {"E", 69, "e"},
-    {"R", 82, "r"}, {"1", 49, "1"}, {"2", 50, "2"}, {"3", 51, "3"}, {"4", 52, "4"},
-    {"F2", 113, "f2"}, {"F3", 114, "f3"}, {"F4", 115, "f4"}, {"F9", 120, "f9"},
-}};
+// Actions first (they follow each game's own keyboard layout), then real keys.
+std::vector<KeyInfo> build_keys() {
+    std::vector<KeyInfo> keys;
+    const char* actions[][2] = {
+        {"ok", "Aceptar"}, {"escape", "Cancelar"}, {"menu", "Menu"}, {"shift", "Correr"},
+        {"pageup", "Pag. anterior"}, {"pagedown", "Pag. siguiente"}, {"up", "Mover arriba"},
+        {"down", "Mover abajo"}, {"left", "Mover izq."}, {"right", "Mover der."},
+        {"control", "Control"}, {"tab", "Tab"},
+    };
+    for (std::size_t i = 0; i < std::size(actions); ++i)
+        keys.push_back({std::string("[") + actions[i][1] + "]", -static_cast<int>(i) - 1, std::string("act:") + actions[i][0]});
+    const std::pair<const char*, int> named[] = {
+        {"Enter", 13}, {"Escape", 27}, {"Espacio", 32}, {"Shift", 16}, {"Ctrl", 17}, {"Alt", 18},
+        {"Tab", 9}, {"Retroceso", 8}, {"RePag", 33}, {"AvPag", 34}, {"Flecha arriba", 38},
+        {"Flecha abajo", 40}, {"Flecha izq.", 37}, {"Flecha der.", 39}, {"Insert", 45}, {"Supr", 46},
+        {"Inicio", 36}, {"Fin", 35},
+    };
+    const char* ids[] = {"enter", "esc", "space", "shift", "ctrl", "alt", "tab", "backspace", "pageup",
+                         "pagedown", "up", "down", "left", "right", "insert", "delete", "home", "end"};
+    for (std::size_t i = 0; i < std::size(named); ++i) keys.push_back({named[i].first, named[i].second, ids[i]});
+    for (char c = 'A'; c <= 'Z'; ++c)
+        keys.push_back({std::string(1, c), c, std::string(1, static_cast<char>(c - 'A' + 'a'))});
+    for (char c = '0'; c <= '9'; ++c) keys.push_back({std::string(1, c), c, std::string(1, c)});
+    for (int f = 1; f <= 12; ++f) keys.push_back({"F" + std::to_string(f), 111 + f, "f" + std::to_string(f)});
+    return keys;
+}
+
+const std::vector<KeyInfo>& keys() {
+    static const std::vector<KeyInfo> table = build_keys();
+    return table;
+}
 
 struct ButtonInfo {
     const char* ini;
     const char* label;
-    const char* gptk;
 };
 
 constexpr std::array<ButtonInfo, kPadButtonCount> kButtons{{
-    {"south", "Btn inferior", "a"},  {"east", "Btn derecho", "b"},
-    {"west", "Btn izquierdo", "x"},  {"north", "Btn superior", "y"},
-    {"select", "Select", "back"},   {"start", "Start", "start"},
-    {"l3", "L3", "l3"},             {"r3", "R3", "r3"},
-    {"l1", "L1", "l1"},             {"r1", "R1", "r1"},
-    {"up", "Cruceta arriba", "up"}, {"down", "Cruceta abajo", "down"},
-    {"left", "Cruceta izq.", "left"}, {"right", "Cruceta der.", "right"},
-    {"l2", "L2", "l2"},             {"r2", "R2", "r2"},
+    {"south", "Btn inferior"}, {"east", "Btn derecho"}, {"west", "Btn izquierdo"}, {"north", "Btn superior"},
+    {"select", "Select"}, {"start", "Start"}, {"l3", "L3"}, {"r3", "R3"}, {"l1", "L1"}, {"r1", "R1"},
+    {"up", "Cruceta arriba"}, {"down", "Cruceta abajo"}, {"left", "Cruceta izq."}, {"right", "Cruceta der."},
+    {"l2", "L2"}, {"r2", "R2"},
 }};
 
 std::string lower(std::string text) {
@@ -52,52 +69,62 @@ std::string trim(const std::string& text) {
 
 } // namespace
 
-const std::array<KeyInfo, 34>& key_table() { return kKeys; }
+const std::vector<KeyInfo>& key_table() { return keys(); }
+
+const std::vector<std::string>& mv_action_names() {
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> out;
+        for (const auto& k : keys())
+            if (k.key_code < 0) out.push_back(k.id.substr(4));
+        return out;
+    }();
+    return names;
+}
 
 const char* pad_button_label(PadButton button) {
     return kButtons[static_cast<std::size_t>(button)].label;
 }
 
-const char* pad_button_gptk(PadButton button) {
-    return kButtons[static_cast<std::size_t>(button)].gptk;
-}
-
 int key_index_for_code(int key_code) {
-    for (std::size_t i = 0; i < kKeys.size(); ++i)
-        if (kKeys[i].key_code == key_code) return static_cast<int>(i);
+    for (std::size_t i = 0; i < keys().size(); ++i)
+        if (keys()[i].key_code == key_code) return static_cast<int>(i);
     return -1;
 }
 
 ControlProfile ControlProfile::defaults() {
-    // Same layout RPG Maker MV players expect from a keyboard (Input.keyMapper defaults).
+    // MV actions, so every game gets its own keys for them (Enter/Z in a standard game, J in
+    // one that remapped "ok"). Codes are -(index in mv_action_names()) - 1.
     ControlProfile p;
     p.key_index.fill(-1);
-    auto set = [&](PadButton b, int code) { p.key_index[static_cast<std::size_t>(b)] = key_index_for_code(code); };
-    set(PadButton::South, 13);  // ok
-    set(PadButton::East, 27);   // escape / cancel
-    set(PadButton::West, 16);   // shift / dash
-    set(PadButton::North, 88);  // X = menu
-    set(PadButton::Select, 9);  // tab
-    set(PadButton::Start, 27);  // menu
-    set(PadButton::L1, 33);     // pageup
-    set(PadButton::R1, 34);     // pagedown
-    set(PadButton::L2, 17);     // control
-    set(PadButton::R2, 18);     // alt (control in MV)
-    set(PadButton::Up, 38);
-    set(PadButton::Down, 40);
-    set(PadButton::Left, 37);
-    set(PadButton::Right, 39);
+    auto set = [&](PadButton b, const char* action) {
+        const auto& names = mv_action_names();
+        const auto it = std::find(names.begin(), names.end(), action);
+        p.key_index[static_cast<std::size_t>(b)] = key_index_for_code(-static_cast<int>(it - names.begin()) - 1);
+    };
+    set(PadButton::South, "ok");
+    set(PadButton::East, "escape");
+    set(PadButton::West, "shift");
+    set(PadButton::North, "menu");
+    set(PadButton::Start, "menu");
+    set(PadButton::Select, "tab");
+    set(PadButton::L1, "pageup");
+    set(PadButton::R1, "pagedown");
+    set(PadButton::L2, "control");
+    set(PadButton::Up, "up");
+    set(PadButton::Down, "down");
+    set(PadButton::Left, "left");
+    set(PadButton::Right, "right");
     return p;
 }
 
 int ControlProfile::key_code(PadButton button) const {
     const int index = key_index[static_cast<std::size_t>(button)];
-    return index >= 0 && index < static_cast<int>(kKeys.size()) ? kKeys[static_cast<std::size_t>(index)].key_code : 0;
+    return index >= 0 && index < static_cast<int>(keys().size()) ? keys()[static_cast<std::size_t>(index)].key_code : 0;
 }
 
 void ControlProfile::cycle(PadButton button, int direction) {
     // -1 (unassigned) is part of the cycle so a button can be disabled.
-    const int count = static_cast<int>(kKeys.size()) + 1;
+    const int count = static_cast<int>(keys().size()) + 1;
     int& index = key_index[static_cast<std::size_t>(button)];
     index = ((index + 1 + direction) % count + count) % count - 1;
 }
@@ -119,8 +146,8 @@ bool ControlProfile::load(const std::filesystem::path& file, std::string& error)
         for (std::size_t b = 0; b < kButtons.size(); ++b) {
             if (name != kButtons[b].ini) continue;
             key_index[b] = -1;
-            for (std::size_t k = 0; k < kKeys.size(); ++k)
-                if (value == kKeys[k].gptk) key_index[b] = static_cast<int>(k);
+            for (std::size_t k = 0; k < keys().size(); ++k)
+                if (value == keys()[k].id) key_index[b] = static_cast<int>(k);
         }
     }
     return true;
@@ -139,7 +166,7 @@ bool ControlProfile::save(const std::filesystem::path& file, std::string& error)
         out << "# RPG2LX: boton de la consola = tecla emulada\n";
         for (std::size_t b = 0; b < kButtons.size(); ++b) {
             const int k = key_index[b];
-            out << kButtons[b].ini << " = " << (k >= 0 ? kKeys[static_cast<std::size_t>(k)].gptk : "none") << '\n';
+            out << kButtons[b].ini << " = " << (k >= 0 ? keys()[static_cast<std::size_t>(k)].id : std::string("none")) << '\n';
         }
         if (!out) {
             error = "No se pudo escribir " + file.u8string();
@@ -152,23 +179,6 @@ bool ControlProfile::save(const std::filesystem::path& file, std::string& error)
         return false;
     }
     return true;
-}
-
-bool ControlProfile::write_gptk(const std::filesystem::path& file, std::string& error) const {
-    std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    std::ofstream out(file, std::ios::trunc);
-    if (!out) {
-        error = "No se pudo escribir " + file.u8string();
-        return false;
-    }
-    for (std::size_t b = 0; b < kButtons.size(); ++b) {
-        const int k = key_index[b];
-        out << kButtons[b].gptk << " = " << (k >= 0 ? kKeys[static_cast<std::size_t>(k)].gptk : "") << '\n';
-    }
-    // Left stick mirrors the arrow keys.
-    out << "left_analog_up = up\nleft_analog_down = down\nleft_analog_left = left\nleft_analog_right = right\n";
-    return static_cast<bool>(out);
 }
 
 std::filesystem::path global_controls_file(const std::filesystem::path& home) {

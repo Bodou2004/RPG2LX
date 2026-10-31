@@ -8,8 +8,8 @@
   "items_opt": [],
   "attr": {
     "title": "RPG2LX - RPG Maker MV HUB",
-    "desc": "HUB for RPG Maker MV games: a lightweight native engine (QuickJS + SDL2) that runs the original corescripts and plugins, plus an optional NW.js browser engine for games whose plugins need a real browser. Per-game engine choice and button-to-keyboard mapping.",
-    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. The browser engine needs the rpg2lx/nwjs folder and PortMaster's Westonpack runtime. Saves (.rpgsave) and settings are kept outside game assets.",
+    "desc": "HUB for RPG Maker MV games with a native engine (QuickJS + SDL2) that runs the original corescripts and plugins unmodified, as an exported game, with full Canvas 2D, DOM and Node/NW.js API support. Per-game button mapping to MV actions or keys.",
+    "inst": "Copy each complete RPG Maker MV game (export or project folder) into its own folder inside ports/rpg2lx/games/. Saves (.rpgsave) and settings are kept outside game assets.",
     "genres": [
       "rpg"
     ],

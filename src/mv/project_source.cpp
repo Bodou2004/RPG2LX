@@ -1,11 +1,48 @@
 #include "rpg2lx/project_source.hpp"
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <regex>
+#include <unordered_map>
+#include <vector>
 
 namespace fs = std::filesystem;
 namespace rpg2lx {
 namespace {
 bool file(const fs::path& path) { std::error_code ec; return fs::is_regular_file(path,ec); }
+
+std::string fold(std::string text) {
+    std::transform(text.begin(),text.end(),text.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});
+    return text;
+}
+
+// Lower-cased name -> real name for each directory already listed (games never change while running).
+const std::unordered_map<std::string,std::string>& listing(const fs::path& dir) {
+    static std::unordered_map<std::string,std::unordered_map<std::string,std::string>> cache;
+    auto [it,inserted]=cache.try_emplace(dir.u8string());
+    if(inserted) {
+        std::error_code ec;
+        for(fs::directory_iterator entry(dir,ec),end;!ec && entry!=end;entry.increment(ec))
+            it->second.emplace(fold(entry->path().filename().u8string()),entry->path().filename().u8string());
+    }
+    return it->second;
+}
+}
+
+fs::path find_project_file(const fs::path& root, const std::string& rel) {
+    const fs::path exact=root/fs::u8path(rel);
+    std::error_code ec;
+    if(fs::exists(exact,ec))return exact;
+    fs::path current=root;
+    for(const auto& part:fs::u8path(rel)) {
+        const auto name=part.u8string();
+        if(name.empty() || name=="." || name=="/")continue;
+        const auto& names=listing(current);
+        const auto match=names.find(fold(name));
+        if(match==names.end())return exact;
+        current/=fs::u8path(match->second);
+    }
+    return current;
 }
 ProjectSourceResult resolve_mv_project(const fs::path& input) {
     try {

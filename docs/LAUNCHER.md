@@ -30,12 +30,12 @@ La biblioteca creada por Antigravity compone title1Name/title2Name desde img/tit
 
 En PortMaster, `RPG2LX.sh` ejecuta `rpg2lx hub --home DIR --request FILE`. Al elegir Jugar, el HUB
 escribe el juego y el motor en `config/launch.request`, sale con código 10, el script lanza el juego
-(`rpg2lx run ... --game-id` o NW.js) y vuelve a abrir el HUB. Fuera de PortMaster,
+(`rpg2lx run ... --game-id`) y vuelve a abrir el HUB. Fuera de PortMaster,
 `rpg2lx launcher` sigue ejecutando el motor nativo dentro del mismo proceso.
 
 - Biblioteca: cruceta/stick elegir, botón inferior abrir menú del juego, botón derecho salir,
   Select controles globales, R1 recargar.
-- Menú del juego: Jugar, Motor (Auto/Nativo/Navegador), Controles de este juego, Usar controles globales.
+- Menú del juego: Jugar, Controles de este juego, Usar controles globales.
 - Editor de controles: una fila por botón; izquierda/derecha cambia la tecla, pulsar un botón salta a
   su fila, botón derecho guarda y vuelve. La navegación del HUB es fija para que un mapeo erróneo no
   impida salir.
@@ -44,7 +44,7 @@ Teclado en PC: flechas, Enter/Z aceptar, Esc/X volver, Tab/C controles, R recarg
 
 ## Estado actual
 
-Ver [STATUS.md](STATUS.md) y [ENGINES.md](ENGINES.md).
+Ver [STATUS.md](STATUS.md).
 
 ## Compilación y diagnóstico
 
