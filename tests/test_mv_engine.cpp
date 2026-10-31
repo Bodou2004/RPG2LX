@@ -214,6 +214,27 @@ void test_real_mv_project(SDL_Renderer* renderer, const fs::path& mv_root) {
     tap_button(engine, "escape", 2, 20);
     require(js("SceneManager._scene.constructor.name") == "Scene_Map", "Escape in Scene_Menu must return to Scene_Map");
 
+    // 5b. Emulated keyboard: keys travel as DOM events through Input.keyMapper and plugin listeners
+    js("window.__pluginKeys = []; document.addEventListener('keydown', function(e) { __pluginKeys.push(e.keyCode); });");
+    engine.set_key(88, true); // X -> escape in MV's default keyMapper
+    step_frames(engine, 2);
+    engine.set_key(88, false);
+    step_frames(engine, 25);
+    require(js("SceneManager._scene.constructor.name") == "Scene_Menu", "X key must open the menu through Input.keyMapper");
+    require(js("__pluginKeys.indexOf(88) >= 0") == "true", "Plugin keydown listeners must receive emulated keys");
+    engine.set_key(27, true);
+    step_frames(engine, 2);
+    engine.set_key(27, false);
+    step_frames(engine, 20);
+    require(js("SceneManager._scene.constructor.name") == "Scene_Map", "Escape key must close the menu");
+    js("Input.keyMapper[65] = 'pagedown';"); // a plugin remapping a key
+    engine.set_key(65, true);
+    step_frames(engine, 1);
+    require(js("Input.isPressed('pagedown')") == "true", "Plugin keyMapper remaps must be honoured");
+    engine.set_key(65, false);
+    step_frames(engine, 1);
+    require(js("Input.isPressed('pagedown')") == "false", "Key release must reach Input");
+
     // 6. Benchmark 120 Scene_Map frames for 60 FPS verification
     const auto t0 = std::chrono::steady_clock::now();
     step_frames(engine, 120);

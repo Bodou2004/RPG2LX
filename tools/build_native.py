@@ -68,6 +68,7 @@ def main():
         "src/mv/mv_engine.cpp",
         "src/launcher/library.cpp",
         "src/launcher/model.cpp",
+        "src/launcher/controls.cpp",
         "src/js/js_runtime.cpp",
         "src/render/font_renderer.cpp",
         *c_objs,

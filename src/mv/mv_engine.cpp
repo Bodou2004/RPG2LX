@@ -125,6 +125,7 @@ struct MvEngine::Impl {
     JSValue fn_step = JS_UNDEFINED;
     JSValue fn_set_input = JS_UNDEFINED;
     JSValue fn_clear_input = JS_UNDEFINED;
+    JSValue fn_key = JS_UNDEFINED;
     JSValue fn_ptr_move = JS_UNDEFINED;
     JSValue fn_ptr_down = JS_UNDEFINED;
     JSValue fn_ptr_up = JS_UNDEFINED;
@@ -254,6 +255,7 @@ struct MvEngine::Impl {
             JS_FreeValue(ctx, fn_step); fn_step = JS_UNDEFINED;
             JS_FreeValue(ctx, fn_set_input); fn_set_input = JS_UNDEFINED;
             JS_FreeValue(ctx, fn_clear_input); fn_clear_input = JS_UNDEFINED;
+            JS_FreeValue(ctx, fn_key); fn_key = JS_UNDEFINED;
             JS_FreeValue(ctx, fn_ptr_move); fn_ptr_move = JS_UNDEFINED;
             JS_FreeValue(ctx, fn_ptr_down); fn_ptr_down = JS_UNDEFINED;
             JS_FreeValue(ctx, fn_ptr_up); fn_ptr_up = JS_UNDEFINED;
@@ -1242,6 +1244,7 @@ bool MvEngine::boot(const fs::path& project_path,
     impl_->fn_step = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxStepScene");
     impl_->fn_set_input = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxSetInput");
     impl_->fn_clear_input = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxClearInput");
+    impl_->fn_key = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxKey");
     impl_->fn_ptr_move = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxPointerMove");
     impl_->fn_ptr_down = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxPointerDown");
     impl_->fn_ptr_up = JS_GetPropertyStr(impl_->ctx, g, "__rpg2lxPointerUp");
@@ -1264,6 +1267,13 @@ void MvEngine::set_button(const std::string& mv_key_name, bool pressed) {
     JS_FreeValue(impl_->ctx, r);
     JS_FreeValue(impl_->ctx, args[0]);
     JS_FreeValue(impl_->ctx, args[1]);
+}
+
+void MvEngine::set_key(int key_code, bool pressed) {
+    if (!impl_->ctx || !JS_IsFunction(impl_->ctx, impl_->fn_key)) return;
+    JSValue args[2] = {JS_NewInt32(impl_->ctx, key_code), JS_NewBool(impl_->ctx, pressed)};
+    JSValue r = JS_Call(impl_->ctx, impl_->fn_key, JS_UNDEFINED, 2, args);
+    JS_FreeValue(impl_->ctx, r);
 }
 
 void MvEngine::clear_inputs() {

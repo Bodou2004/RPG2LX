@@ -22,23 +22,29 @@ rpg2lx/
 
 Copiar cada juego completo dentro de una carpeta inmediata de `games/`. Se reconoce la estructura directa y la estructura con `www/`. No hace falta crear un port separado por juego. Las carpetas ocultas, enlaces simbólicos de la biblioteca y archivos sueltos no aparecen en la lista. Una carpeta incompleta aparece con aviso.
 
-El título viene de `System.json`; la identidad para partidas y configuración es el nombre de la carpeta. Dos juegos con el mismo título mantienen directorios separados. Si se cambia el nombre de una carpeta, también hay que renombrar su carpeta correspondiente de saves/config para conservar esa asociación. RPG2LX no escribe partidas en los assets. La versión 0.3 guarda 20 slots JSON propios en saves/<carpeta>/, con respaldo al reemplazar. No son .rpgsave de MV.
+El título viene de `System.json`; la identidad para partidas y configuración es el nombre de la carpeta. Dos juegos con el mismo título mantienen directorios separados. Si se cambia el nombre de una carpeta, también hay que renombrar su carpeta correspondiente de saves/config para conservar esa asociación. RPG2LX no escribe partidas en los assets. El motor nativo guarda `.rpgsave` estándar de MV en saves/<carpeta>/.
 
 La biblioteca creada por Antigravity compone title1Name/title2Name desde img/titles1 e img/titles2 como vista previa. Si falta una imagen muestra una tarjeta alternativa sin interrumpir la biblioteca.
 
-## Controles
+## HUB y controles
 
-- D-pad o stick izquierdo: elegir juego.
-- A / Enter / Z: ver detalles; dentro de detalles, comprobar los datos.
-- B / Escape / X: volver; desde la lista, salir.
-- X / P desde lista o detalles: abrir el título del juego. En mapa, A/Enter/Z/espacio interactúa; B/Start/X/Escape abre o cancela el menú; Y/Shift corre. Volver a biblioteca exige Menú → Salir → Biblioteca RPG2LX. No se destruye la sesión al cancelar.
-- Y / R: actualizar la biblioteca sin reiniciar. La selección se conserva por carpeta cuando sigue disponible.
+En PortMaster, `RPG2LX.sh` ejecuta `rpg2lx hub --home DIR --request FILE`. Al elegir Jugar, el HUB
+escribe el juego y el motor en `config/launch.request`, sale con código 10, el script lanza el juego
+(`rpg2lx run ... --game-id` o NW.js) y vuelve a abrir el HUB. Fuera de PortMaster,
+`rpg2lx launcher` sigue ejecutando el motor nativo dentro del mismo proceso.
 
-La biblioteca usa resolución lógica 640x480 y SDL2 GameController; el juego usa las dimensiones detectadas, 816x624 por defecto. El bitmap de texto incluye ASCII y Latin-1 (tildes y ñ); otros caracteres se muestran como `?` por ahora. GameFont sigue pendiente. Se rechazan proyectos identificados explícitamente como MZ; detectar MV no prueba compatibilidad de plugins.
+- Biblioteca: cruceta/stick elegir, botón inferior abrir menú del juego, botón derecho salir,
+  Select controles globales, R1 recargar.
+- Menú del juego: Jugar, Motor (Auto/Nativo/Navegador), Controles de este juego, Usar controles globales.
+- Editor de controles: una fila por botón; izquierda/derecha cambia la tecla, pulsar un botón salta a
+  su fila, botón derecho guarda y vuelve. La navegación del HUB es fija para que un mapeo erróneo no
+  impida salir.
+
+Teclado en PC: flechas, Enter/Z aceptar, Esc/X volver, Tab/C controles, R recargar, P jugar.
 
 ## Estado actual
 
-La biblioteca ofrece lista paginada, preview, detalles y comprobación. X/P abre el título original dentro del soporte nativo. Hay seguidores, menús del juego y persistencia propia; ver NATIVE_EXPLORATION.md y MV_COMPATIBILITY.md. No se ejecuta JavaScript: batalla, audio, plugins y muchos sistemas siguen pendientes.
+Ver [STATUS.md](STATUS.md) y [ENGINES.md](ENGINES.md).
 
 ## Compilación y diagnóstico
 

@@ -3,19 +3,26 @@
 #ifdef RPG2LX_WITH_SDL
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include "rpg2lx/controls.hpp"
 #include "rpg2lx/core.hpp"
 #include "rpg2lx/library_view.hpp"
 #include "rpg2lx/map_view.hpp"
 #include "rpg2lx/mv_engine.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <fstream>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace {
 constexpr int kDefaultWidth = 640;
 constexpr int kDefaultHeight = 480;
+constexpr int kStickThreshold = 16000;
+// Exit code that tells RPG2LX.sh the HUB wrote a launch request.
+constexpr int kLaunchRequested = 10;
 
 SDL_Rect compute_aspect_viewport(int out_w, int out_h, int game_w, int game_h) {
     if (out_w <= 0 || out_h <= 0 || game_w <= 0 || game_h <= 0) {
@@ -28,12 +35,96 @@ SDL_Rect compute_aspect_viewport(int out_w, int out_h, int game_w, int game_h) {
     const int vh = std::max(1, static_cast<int>(std::round(game_h * s)));
     return {(out_w - vw) / 2, (out_h - vh) / 2, vw, vh};
 }
+
+// Physical keyboard -> DOM keyCode, the value MV's Input.keyMapper and plugins read.
+int dom_key_code(SDL_Keycode key) {
+    if (key >= SDLK_a && key <= SDLK_z) return 65 + (key - SDLK_a);
+    if (key >= SDLK_0 && key <= SDLK_9) return 48 + (key - SDLK_0);
+    if (key >= SDLK_F1 && key <= SDLK_F12) return 112 + (key - SDLK_F1);
+    if (key >= SDLK_KP_1 && key <= SDLK_KP_9) return 97 + (key - SDLK_KP_1);
+    switch (key) {
+        case SDLK_RETURN: case SDLK_KP_ENTER: return 13;
+        case SDLK_ESCAPE: return 27;
+        case SDLK_SPACE: return 32;
+        case SDLK_TAB: return 9;
+        case SDLK_BACKSPACE: return 8;
+        case SDLK_LSHIFT: case SDLK_RSHIFT: return 16;
+        case SDLK_LCTRL: case SDLK_RCTRL: return 17;
+        case SDLK_LALT: case SDLK_RALT: return 18;
+        case SDLK_PAGEUP: return 33;
+        case SDLK_PAGEDOWN: return 34;
+        case SDLK_LEFT: return 37;
+        case SDLK_UP: return 38;
+        case SDLK_RIGHT: return 39;
+        case SDLK_DOWN: return 40;
+        case SDLK_INSERT: return 45;
+        case SDLK_DELETE: return 46;
+        case SDLK_KP_0: return 96;
+        default: return 0;
+    }
+}
+
+rpg2lx::PadButton pad_button_from_sdl(Uint8 button) {
+    using rpg2lx::PadButton;
+    switch (button) {
+        case SDL_CONTROLLER_BUTTON_A: return PadButton::South;
+        case SDL_CONTROLLER_BUTTON_B: return PadButton::East;
+        case SDL_CONTROLLER_BUTTON_X: return PadButton::West;
+        case SDL_CONTROLLER_BUTTON_Y: return PadButton::North;
+        case SDL_CONTROLLER_BUTTON_BACK: return PadButton::Select;
+        case SDL_CONTROLLER_BUTTON_START: return PadButton::Start;
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK: return PadButton::L3;
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return PadButton::R3;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return PadButton::L1;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return PadButton::R1;
+        case SDL_CONTROLLER_BUTTON_DPAD_UP: return PadButton::Up;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return PadButton::Down;
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return PadButton::Left;
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return PadButton::Right;
+        default: return PadButton::Count;
+    }
+}
+
+// Current state of every pad button across all controllers (stick mirrors the d-pad).
+std::array<bool, rpg2lx::kPadButtonCount> poll_pad(const std::vector<SDL_GameController*>& controllers) {
+    using rpg2lx::PadButton;
+    std::array<bool, rpg2lx::kPadButtonCount> held{};
+    for (auto* gc : controllers) {
+        for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b) {
+            const auto pad = pad_button_from_sdl(static_cast<Uint8>(b));
+            if (pad != PadButton::Count && SDL_GameControllerGetButton(gc, static_cast<SDL_GameControllerButton>(b)))
+                held[static_cast<std::size_t>(pad)] = true;
+        }
+        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > kStickThreshold)
+            held[static_cast<std::size_t>(PadButton::L2)] = true;
+        if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > kStickThreshold)
+            held[static_cast<std::size_t>(PadButton::R2)] = true;
+        const int ax = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
+        const int ay = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
+        if (ay < -kStickThreshold) held[static_cast<std::size_t>(PadButton::Up)] = true;
+        if (ay > kStickThreshold) held[static_cast<std::size_t>(PadButton::Down)] = true;
+        if (ax < -kStickThreshold) held[static_cast<std::size_t>(PadButton::Left)] = true;
+        if (ax > kStickThreshold) held[static_cast<std::size_t>(PadButton::Right)] = true;
+    }
+    return held;
+}
+
+bool write_launch_request(const std::filesystem::path& file, const rpg2lx::LauncherModel::LaunchRequest& request) {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream out(file, std::ios::trunc);
+    out << "engine=" << (request.engine == rpg2lx::Engine::Browser ? "browser" : "native") << '\n'
+        << "project=" << request.project.u8string() << '\n'
+        << "id=" << request.id << '\n';
+    return static_cast<bool>(out);
+}
 } // namespace
 
 namespace rpg2lx {
 
 int run_launcher(GameLibrary& library, int smoke_frames, const std::string& screenshot, bool start_first,
-                 const std::filesystem::path& direct_project) {
+                 const std::filesystem::path& direct_project, const std::filesystem::path& request_file,
+                 const std::string& game_id) {
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::cerr << "SDL initialization: " << SDL_GetError() << '\n';
@@ -82,6 +173,7 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     SDL_RenderSetLogicalSize(renderer.get(), kDefaultWidth, kDefaultHeight);
 
     LauncherModel model(library);
+    model.set_hub_mode(!request_file.empty());
     LibraryView library_view(renderer.get());
     std::unique_ptr<MapView> map_view;
     std::unique_ptr<MvEngine> mv_engine;
@@ -124,10 +216,16 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 
     using Controller = std::unique_ptr<SDL_GameController, decltype(&SDL_GameControllerClose)>;
     std::vector<Controller> controllers;
+    std::vector<SDL_GameController*> controller_ptrs;
+    auto refresh_controller_ptrs = [&]() {
+        controller_ptrs.clear();
+        for (const auto& c : controllers) controller_ptrs.push_back(c.get());
+    };
     auto open_controller = [&](int index) {
         if (SDL_IsGameController(index)) {
             if (auto* c = SDL_GameControllerOpen(index)) {
                 controllers.emplace_back(c, SDL_GameControllerClose);
+                refresh_controller_ptrs();
             }
         }
     };
@@ -146,17 +244,26 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         return gx >= 0 && gx < gw && gy >= 0 && gy < gh;
     };
 
-    struct MvInputState {
-        bool ok = false;
-        bool escape = false;
-        bool shift = false;
-        bool pageup = false;
-        bool pagedown = false;
-        bool up = false;
-        bool down = false;
-        bool left = false;
-        bool right = false;
-    } prev_mv_input{};
+    // Emulated keyboard for the running game: pad buttons go through the control profile,
+    // physical keys pass straight through. Keys are sent only when their state changes.
+    ControlProfile profile = ControlProfile::defaults();
+    std::multiset<int> keyboard_keys;
+    std::set<int> sent_keys;
+    auto reset_game_input = [&]() {
+        keyboard_keys.clear();
+        sent_keys.clear();
+    };
+    auto close_game = [&]() {
+        if (mv_engine) {
+            mv_engine->shutdown();
+            mv_engine.reset();
+        }
+        destroy_mv_canvas();
+        reset_game_input();
+        if (!direct_project.empty()) return false;
+        model.act(MenuAction::CloseSession);
+        return true;
+    };
 
     bool running = true;
     int frames = 0;
@@ -181,13 +288,16 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                                        return SDL_GameControllerGetAttached(c.get()) == SDL_FALSE;
                                    }),
                     controllers.end());
+                refresh_controller_ptrs();
             } else if (in_mv && mv_engine) {
                 if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F12) {
-                    mv_engine->shutdown();
-                    mv_engine.reset();
-                    prev_mv_input = {};
-                    if (!direct_project.empty()) running = false;
-                    else model.act(MenuAction::CloseSession);
+                    if (!close_game()) running = false;
+                } else if ((event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) && !event.key.repeat) {
+                    const int code = dom_key_code(event.key.keysym.sym);
+                    if (code) {
+                        if (event.type == SDL_KEYDOWN) keyboard_keys.insert(code);
+                        else if (auto it = keyboard_keys.find(code); it != keyboard_keys.end()) keyboard_keys.erase(it);
+                    }
                 } else if (event.type == SDL_MOUSEMOTION) {
                     int gx = 0, gy = 0;
                     if (map_window_to_mv(event.motion.x, event.motion.y, gx, gy)) {
@@ -204,43 +314,56 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                     mv_engine->on_pointer_up(gx, gy);
                 }
             } else if (event.type == SDL_KEYDOWN) {
-                if (event.key.repeat && event.key.keysym.sym != SDLK_UP && event.key.keysym.sym != SDLK_DOWN)
+                const auto sym = event.key.keysym.sym;
+                if (event.key.repeat && sym != SDLK_UP && sym != SDLK_DOWN && sym != SDLK_LEFT && sym != SDLK_RIGHT)
                     continue;
                 const bool in_legacy_session = (model.session() != nullptr);
-                switch (event.key.keysym.sym) {
+                switch (sym) {
                     case SDLK_UP: model.act(MenuAction::Up); break;
                     case SDLK_DOWN: model.act(MenuAction::Down); break;
+                    case SDLK_LEFT: model.act(MenuAction::Left); break;
+                    case SDLK_RIGHT: model.act(MenuAction::Right); break;
                     case SDLK_SPACE:
                     case SDLK_RETURN:
                     case SDLK_KP_ENTER:
                     case SDLK_z:
-                        model.act(in_legacy_session ? MenuAction::Confirm : MenuAction::Play);
+                        model.act(MenuAction::Confirm);
                         break;
                     case SDLK_ESCAPE:
                     case SDLK_x:
                         model.act(MenuAction::Back);
+                        break;
+                    case SDLK_TAB:
+                    case SDLK_c:
+                        if (!in_legacy_session) model.act(MenuAction::OpenControls);
                         break;
                     case SDLK_r: model.act(MenuAction::Refresh); break;
                     case SDLK_p: model.act(MenuAction::Play); break;
                     default: break;
                 }
             } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
+                // HUB navigation is fixed on purpose: a broken mapping can never lock the user out.
                 const bool in_legacy_session = (model.session() != nullptr);
+                const auto pad = pad_button_from_sdl(event.cbutton.button);
+                if (!in_legacy_session && model.screen() == HubScreen::Controls && pad != PadButton::Count) {
+                    model.pad_pressed(pad);
+                }
                 switch (event.cbutton.button) {
                     case SDL_CONTROLLER_BUTTON_DPAD_UP: model.act(MenuAction::Up); break;
                     case SDL_CONTROLLER_BUTTON_DPAD_DOWN: model.act(MenuAction::Down); break;
-                    case SDL_CONTROLLER_BUTTON_A:
-                    case SDL_CONTROLLER_BUTTON_B:
-                        model.act(in_legacy_session ? MenuAction::Confirm : MenuAction::Play);
-                        break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: model.act(MenuAction::Left); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: model.act(MenuAction::Right); break;
+                    case SDL_CONTROLLER_BUTTON_A: model.act(MenuAction::Confirm); break;
+                    case SDL_CONTROLLER_BUTTON_B: model.act(MenuAction::Back); break;
                     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-                        if (!in_legacy_session) model.act(MenuAction::Refresh);
+                        if (!in_legacy_session && model.screen() == HubScreen::Library) model.act(MenuAction::Refresh);
                         break;
-                    case SDL_CONTROLLER_BUTTON_X:
-                    case SDL_CONTROLLER_BUTTON_Y:
-                    case SDL_CONTROLLER_BUTTON_START:
                     case SDL_CONTROLLER_BUTTON_BACK:
-                        model.act(MenuAction::Back);
+                        if (!in_legacy_session && model.screen() != HubScreen::Controls) model.act(MenuAction::OpenControls);
+                        break;
+                    case SDL_CONTROLLER_BUTTON_START:
+                        if (in_legacy_session) model.act(MenuAction::Back);
+                        else if (model.screen() == HubScreen::GameMenu) model.act(MenuAction::Play);
                         break;
                     default: break;
                 }
@@ -264,81 +387,29 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                     if (!direct_project.empty()) running = false;
                 } else {
                     mv_engine = std::move(next_mv);
-                    prev_mv_input = {};
+                    profile = load_effective_profile(library.home(), game_id.empty() ? model.mv_game_id() : game_id);
+                    reset_game_input();
                 }
             }
 
             if (mv_engine) {
-                // Check PortMaster exit combo (Select + Start) and poll live MV inputs
-                const Uint8* keys = SDL_GetKeyboardState(nullptr);
-                bool exit_combo = false;
-
-                MvInputState cur{};
-                cur.ok = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER] ||
-                         keys[SDL_SCANCODE_SPACE] || keys[SDL_SCANCODE_Z];
-                cur.escape = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_X] ||
-                             keys[SDL_SCANCODE_INSERT] || keys[SDL_SCANCODE_KP_0];
-                cur.shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
-                cur.pageup = keys[SDL_SCANCODE_PAGEUP] || keys[SDL_SCANCODE_Q];
-                cur.pagedown = keys[SDL_SCANCODE_PAGEDOWN] || keys[SDL_SCANCODE_W];
-                cur.up = keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_KP_8];
-                cur.down = keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_KP_2];
-                cur.left = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_KP_4];
-                cur.right = keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_KP_6];
-
-                for (const auto& c : controllers) {
-                    auto* gc = c.get();
-                    const bool back_held = SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK) != 0;
-                    const bool start_held = SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START) != 0;
-                    if (back_held && start_held) {
-                        exit_combo = true;
-                        break;
-                    }
-                    // R36S / Nintendo layout: SDL BUTTON_A = South (physical B = Confirm),
-                    // SDL BUTTON_B = East (physical A = Cancel/Menu),
-                    // SDL BUTTON_Y = North (physical X = Menu),
-                    // SDL BUTTON_X = West (physical Y = Dash)
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A)) cur.ok = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B) ||
-                        SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_Y) ||
-                        (start_held && !back_held)) {
-                        cur.escape = true;
-                    }
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_X)) cur.shift = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) cur.pageup = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) cur.pagedown = true;
-
-                    const int ax = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
-                    const int ay = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_UP) || ay < -16000) cur.up = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || ay > 16000) cur.down = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || ax < -16000) cur.left = true;
-                    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || ax > 16000) cur.right = true;
-                }
+                const auto pad = poll_pad(controller_ptrs);
+                const bool exit_combo = pad[static_cast<std::size_t>(PadButton::Select)] &&
+                                        pad[static_cast<std::size_t>(PadButton::Start)];
 
                 if (exit_combo) {
-                    mv_engine->shutdown();
-                    mv_engine.reset();
-                    destroy_mv_canvas();
-                    prev_mv_input = {};
-                    if (!direct_project.empty()) running = false;
-                    else model.act(MenuAction::CloseSession);
+                    if (!close_game()) running = false;
                 } else {
-                    auto sync_btn = [&](const char* name, bool now_v, bool& prev_v) {
-                        if (now_v != prev_v) {
-                            mv_engine->set_button(name, now_v);
-                            prev_v = now_v;
-                        }
-                    };
-                    sync_btn("ok", cur.ok, prev_mv_input.ok);
-                    sync_btn("escape", cur.escape, prev_mv_input.escape);
-                    sync_btn("shift", cur.shift, prev_mv_input.shift);
-                    sync_btn("pageup", cur.pageup, prev_mv_input.pageup);
-                    sync_btn("pagedown", cur.pagedown, prev_mv_input.pagedown);
-                    sync_btn("up", cur.up, prev_mv_input.up);
-                    sync_btn("down", cur.down, prev_mv_input.down);
-                    sync_btn("left", cur.left, prev_mv_input.left);
-                    sync_btn("right", cur.right, prev_mv_input.right);
+                    std::set<int> wanted(keyboard_keys.begin(), keyboard_keys.end());
+                    for (std::size_t b = 0; b < kPadButtonCount; ++b) {
+                        if (!pad[b]) continue;
+                        if (const int code = profile.key_code(static_cast<PadButton>(b))) wanted.insert(code);
+                    }
+                    for (const int code : sent_keys)
+                        if (!wanted.count(code)) mv_engine->set_key(code, false);
+                    for (const int code : wanted)
+                        if (!sent_keys.count(code)) mv_engine->set_key(code, true);
+                    sent_keys = std::move(wanted);
 
                     const int gw = mv_engine->screen_width();
                     const int gh = mv_engine->screen_height();
@@ -382,17 +453,9 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                         Logger::error("MV runtime error: " + step_err);
                         std::cerr << step_err << '\n';
                         failed_session = true;
-                        mv_engine->shutdown();
-                        mv_engine.reset();
-                        destroy_mv_canvas();
-                        model.act(MenuAction::CloseSession);
-                        if (!direct_project.empty()) running = false;
+                        if (!close_game()) running = false;
                     } else if (mv_engine->wants_exit()) {
-                        mv_engine->shutdown();
-                        mv_engine.reset();
-                        destroy_mv_canvas();
-                        if (!direct_project.empty()) running = false;
-                        else model.act(MenuAction::CloseSession);
+                        if (!close_game()) running = false;
                     }
                 }
             }
@@ -400,7 +463,7 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
             for (const auto& controller : controllers) {
                 const auto axis = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTY);
                 if ((session->scene() != GameScene::Map || session->choosing()) &&
-                    now - last_axis > 180 && (axis < -16000 || axis > 16000)) {
+                    now - last_axis > 180 && (axis < -kStickThreshold || axis > kStickThreshold)) {
                     model.act(axis < 0 ? MenuAction::Up : MenuAction::Down);
                     last_axis = now;
                 }
@@ -417,10 +480,10 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                 const int ax = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTX);
                 const int ay = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTY);
                 dash = dash || SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_X);
-                if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_DOWN) || ay > 16000) direction = 2;
-                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_UP) || ay < -16000) direction = 8;
-                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_LEFT) || ax < -16000) direction = 4;
-                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || ax > 16000) direction = 6;
+                if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_DOWN) || ay > kStickThreshold) direction = 2;
+                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_UP) || ay < -kStickThreshold) direction = 8;
+                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_LEFT) || ax < -kStickThreshold) direction = 4;
+                else if (SDL_GameControllerGetButton(controller.get(), SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || ax > kStickThreshold) direction = 6;
             }
             session->set_dash(dash);
             if (direction && map_error.empty()) session->move(direction);
@@ -438,18 +501,19 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
             }
         } else {
             for (const auto& controller : controllers) {
-                const auto axis = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTY);
-                if (now - last_axis > 180 && (axis < -16000 || axis > 16000)) {
-                    model.act(axis < 0 ? MenuAction::Up : MenuAction::Down);
+                const int ax = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTX);
+                const int ay = SDL_GameControllerGetAxis(controller.get(), SDL_CONTROLLER_AXIS_LEFTY);
+                if (now - last_axis <= 180) break;
+                if (ay < -kStickThreshold || ay > kStickThreshold) {
+                    model.act(ay < 0 ? MenuAction::Up : MenuAction::Down);
+                    last_axis = now;
+                } else if (ax < -kStickThreshold || ax > kStickThreshold) {
+                    model.act(ax < 0 ? MenuAction::Left : MenuAction::Right);
                     last_axis = now;
                 }
             }
 
-            if (mv_engine) {
-                mv_engine->shutdown();
-                mv_engine.reset();
-                destroy_mv_canvas();
-            }
+            if (mv_engine) close_game();
             map_view.reset();
             reported_session_error.clear();
             map_error.clear();
@@ -478,18 +542,12 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 
         SDL_RenderPresent(renderer.get());
 
-        if (smoke_frames == 0) {
+        // VSync already paces the frame. Without it, sleep instead of spinning: a busy-wait
+        // keeps a core at 100% on the handheld, steals time from the JS thread and heats the SoC.
+        if (smoke_frames == 0 && !has_vsync) {
+            constexpr double kTargetFrameMs = 1000.0 / 60.0;
             const double elapsed_ms = (static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0) / perf_freq;
-            // Only sleep manually if VSync did NOT pace the frame (e.g. software renderer or high-Hz display)
-            if (!has_vsync || elapsed_ms < 8.0) {
-                constexpr double kTargetFrameMs = 1000.0 / 60.0;
-                const double rem_ms = kTargetFrameMs - elapsed_ms;
-                if (rem_ms > 1.5) {
-                    SDL_Delay(static_cast<Uint32>(rem_ms - 1.0));
-                }
-                while (((static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0) / perf_freq) < kTargetFrameMs) {
-                }
-            }
+            if (elapsed_ms + 1.0 < kTargetFrameMs) SDL_Delay(static_cast<Uint32>(kTargetFrameMs - elapsed_ms));
         }
     }
 
@@ -498,6 +556,13 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         mv_engine.reset();
     }
 
+    if (const auto& request = model.launch_request(); request && !request_file.empty()) {
+        if (!write_launch_request(request_file, *request)) {
+            std::cerr << "Cannot write launch request " << request_file.u8string() << '\n';
+            return 2;
+        }
+        return kLaunchRequested;
+    }
     if ((start_first || !direct_project.empty()) && failed_session) return 2;
     return 0;
 }
@@ -505,7 +570,8 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 } // namespace rpg2lx
 #else
 namespace rpg2lx {
-int run_launcher(GameLibrary&, int, const std::string&, bool, const std::filesystem::path&) {
+int run_launcher(GameLibrary&, int, const std::string&, bool, const std::filesystem::path&,
+                 const std::filesystem::path&, const std::string&) {
     std::cerr << "This diagnostic build has no graphical menu. Build with RPG2LX_WITH_SDL=ON.\n";
     return 3;
 }

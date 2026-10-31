@@ -2,29 +2,23 @@
 
 Runtime 1:1 portable para proyectos RPG Maker MV, diseñado para consolas de bolsillo Linux ARM64 (R36S / Rockchip RK3326 y compatibles) y distribución mediante PortMaster.
 
-## Estado (`0.5.0`)
+## Estado (`0.6.0`)
 
-`0.5.0`: motor 1:1 de RPG Maker MV acelerado por GPU (SDL2 + QuickJS + `stb_truetype` + `stb_vorbis`). Ejecuta directamente los scripts originales sin modificar del proyecto (`js/rpg_core.js`, `js/rpg_managers.js`, `js/rpg_objects.js`, `js/rpg_scenes.js`, `js/rpg_sprites.js`, `js/rpg_windows.js` y `js/plugins/*.js` como `Community_Basic` y `CustomLogo` / `MadeWithMv`) sobre un grafo de escena acelerado en C++/SDL2 a **60 FPS** estables.
+HUB para PortMaster con dos motores por juego:
 
-Incluye:
-- **Pantallas de presentación y título originales:** ejecución real de plugins de splash (`Scene_Logo` / `MadeWithMv.png` con fade-in/fade-out) y `Scene_Title` idéntica a escritorio (`titles1`, `titles2`, título contorneado y animación de `Window_TitleCommand` con BGM).
-- **Tipografía TrueType adaptada a pantallas portátiles (640×480):** escalado `em` fiel a HTML5 Canvas, refuerzo de legibilidad para pantallas de 3.5", contorno circular nítido, compresión horizontal `maxWidth`, decodificación UTF-8 completa (`¡¿áéíóúÁÉÍÓÚñÑ`) y presentación lineal con relación de aspecto preservada.
-- **Estructura, escenas, funciones y animaciones 1:1 de MV:** `Scene_Boot`, `Scene_Title`, `Scene_Map`, `Scene_Menu`, `Scene_Item`, `Scene_Skill`, `Scene_Equip`, `Scene_Status`, `Scene_Options`, `Scene_Save`, `Scene_Load`, `Scene_GameEnd`, `Scene_Shop`, `Scene_Name`, `Scene_Battle` y `Scene_Gameover`; animaciones de apertura/cierre de ventanas (`openness`), pulso de cursor, flecha de pausa, máquina de escribir con códigos de escape (`\C[n]`, `\I[n]`, `\N[n]`, `\V[n]`), `Animations.json`, globos de expresión, seguidores, clima, tintes/flashes/sacudidas y desenfoque `Bitmap.snap` de fondo de menú.
-- **Audio polifónico OGG / `.rpgmvo`:** mezclador SDL2 + `stb_vorbis` con soporte de metadatos `LOOPSTART` y `LOOPLENGTH`, `volume`, `pitch`, `pan`, `fadeIn` y `fadeOut` para BGM, BGS, ME y SE.
-- **Guardado estándar `.rpgsave` aislado:** compresión `LZString` compatible con RPG Maker MV almacenada en `saves/<juego>/` sin alterar jamás la carpeta original del proyecto.
+- **Nativo:** QuickJS + SDL2. Ejecuta los `js/rpg_*.js` y plugins originales del juego. Ligero.
+- **Navegador:** NW.js (Chromium real) dentro del runtime Westonpack de PortMaster, para plugins que el nativo no soporta.
+- **Auto** (por defecto): nativo; si falla, la próxima vez usa el navegador.
 
-## Controles (PortMaster / Consola / Teclado)
+El HUB y cada juego corren en procesos separados: si un juego se cae, se vuelve al HUB. Lo comprobado y lo pendiente está en [STATUS.md](docs/STATUS.md); los motores, en [ENGINES.md](docs/ENGINES.md).
 
-- **Biblioteca RPG2LX:**
-  - `B` (Sur) / `A` / `Enter` / `Z`: Iniciar juego directamente
-  - `R` / `F5`: Actualizar biblioteca
-  - `Start` / `Esc`: Salir
-- **Dentro del juego (RPG Maker MV):**
-  - `B` (Sur en consola Nintendo/R36S) / `Enter` / `Z` / `Espacio`: Confirmar / Interactuar (`ok`)
-  - `A` (Este) / `X` (Norte) / `Start` / `Esc`: Cancelar / Abrir y cerrar Menú (`escape` / `menu` / `cancel`)
-  - `Y` (Oeste) / `Shift`: Correr (`shift`)
-  - `L1` / `R1` (`Q` / `W`): Cambiar personaje en menús (`pageup` / `pagedown`)
-  - `Select + Start`: Cerrar partida y volver a la biblioteca RPG2LX
+## Controles
+
+Los botones se nombran por posición, porque A/B cambian según la consola.
+
+- **HUB:** cruceta/stick elegir · botón inferior abrir/aceptar · botón derecho volver/salir · Select controles globales · R1 recargar · Start (en el menú del juego) jugar.
+- **En el juego:** cada botón emula una tecla y se configura en el HUB (global o por juego). Por defecto: inferior=Enter, derecho=Escape, izquierdo=Shift, superior=X, Start=Escape, Select=Tab, L1/R1=RePag/AvPag, L2=Ctrl, R2=Alt, cruceta/stick=flechas. Las teclas pasan por `Input.keyMapper`, así que se respetan los botones internos de MV y los que añadan los plugins.
+- **Select + Start:** cerrar el juego y volver al HUB.
 
 ## Uso
 

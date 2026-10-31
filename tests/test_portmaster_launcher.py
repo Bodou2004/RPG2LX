@@ -8,6 +8,22 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 
+# Mock binary: logs every call; the first two "hub" calls request a game (native, then
+# browser), the third quits. "run" exits 7 to check that results are recorded.
+MOCK='''#!/bin/bash
+(IFS='|'; printf '%s\\n' "$*") >> "$TEST_OUTPUT/calls"
+case "$1" in
+hub)
+    n=$(cat "$TEST_OUTPUT/hubs" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$TEST_OUTPUT/hubs"
+    request="$5"
+    if [ "$n" = 1 ]; then printf 'engine=native\\nproject=/games/My Game\\nid=My Game\\n' > "$request"; exit 10; fi
+    if [ "$n" = 2 ]; then printf 'engine=browser\\nproject=/games/My Game\\nid=My Game\\n' > "$request"; exit 10; fi
+    exit 0 ;;
+run) exit 7 ;;
+*) exit 0 ;;
+esac
+'''
+
 
 def posix(path):
     value=path.resolve().as_posix()
@@ -34,26 +50,33 @@ pm_finish() { printf 'finished' > "$TEST_OUTPUT/cleanup"; }
 ''',encoding='utf-8')
         script=ports/'RPG2LX.sh';shutil.copy2(ROOT/'portmaster/RPG2LX.sh',script)
         binary=runtime/'rpg2lx.aarch64'
-        binary.write_text('''#!/bin/bash
-printf '%s\\n' "$@" > "$TEST_OUTPUT/args"
-exit 23
-''',encoding='utf-8')
+        binary.write_text(MOCK,encoding='utf-8')
         binary.chmod(0o755)
         env=os.environ.copy();env.update(XDG_DATA_HOME=posix(base/'xdg'),TEST_OUTPUT=posix(base),TEST_ARCH='aarch64')
         result=subprocess.run([args.bash,posix(script)],env=env,capture_output=True,text=True)
-        if result.returncode!=23:raise RuntimeError('Port exit status not preserved: '+result.stdout+result.stderr)
-        expected=['launcher','--home',posix(runtime)]
-        if (base/'args').read_text().splitlines()!=expected:raise RuntimeError('Incorrect data path or arguments')
+        if result.returncode!=0:raise RuntimeError('Quitting the HUB must exit 0: '+result.stdout+result.stderr)
+        home=posix(runtime);request=home+'/config/launch.request'
+        expected=[
+            f'hub|--home|{home}|--request|{request}',
+            f'run|/games/My Game|--home|{home}|--game-id|My Game',
+            f'record-result|--home|{home}|--game-id|My Game|--engine|native|--status|7',
+            f'hub|--home|{home}|--request|{request}',
+            # Browser engine without nwjs/: refused before export or launch, still recorded.
+            f'record-result|--home|{home}|--game-id|My Game|--engine|browser|--status|2',
+            f'hub|--home|{home}|--request|{request}',
+        ]
+        calls=(base/'calls').read_text().splitlines()
+        if calls!=expected:raise RuntimeError('Unexpected HUB/game cycle:\n'+'\n'.join(calls))
         if (base/'cleanup').read_text()!='finished':raise RuntimeError('PortMaster cleanup was not called')
         if (base/'helper').read_text()!=posix(binary):raise RuntimeError('Incorrect platform helper binary')
         for name in ('games','saves','config','logs'):
             if not (runtime/name).is_dir():raise RuntimeError('Missing runtime directory '+name)
-        (base/'args').unlink();(base/'cleanup').unlink()
+        (base/'calls').unlink();(base/'cleanup').unlink()
         env['TEST_ARCH']='armhf'
         wrong=subprocess.run([args.bash,posix(script)],env=env,capture_output=True,text=True)
-        if wrong.returncode!=1 or (base/'args').exists() or not (base/'cleanup').exists():
+        if wrong.returncode!=1 or (base/'calls').exists() or not (base/'cleanup').exists():
             raise RuntimeError('Wrong architecture must fail without launching and still clean up')
-    print('PortMaster launcher: portable paths, SD2/spaces, cleanup, exit status and architecture checks passed')
+    print('PortMaster launcher: HUB/game cycle, SD2/spaces, cleanup, exit status and architecture checks passed')
     return 0
 
 

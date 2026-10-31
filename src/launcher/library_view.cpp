@@ -6,6 +6,8 @@
 
 #include <SDL.h>
 #include <algorithm>
+#include <array>
+#include <utility>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -349,7 +351,7 @@ struct LibraryView::Impl {
         draw_rect(renderer, 0, 52, kScreenWidth, 2, kBorderColor);
 
         put_text("RPG2LX", 20, 14, kAccentColor, 2, 10);
-        put_text("RPG MAKER MV - PORTMASTER 1:1", 136, 18, kInkBright, 1, 36);
+        put_text("HUB RPG MAKER MV", 136, 18, kInkBright, 1, 36);
 
         const std::string count_str = std::to_string(model.games().size()) + (model.games().size() == 1 ? " JUEGO" : " JUEGOS");
         draw_rect(renderer, kScreenWidth - 118, 15, 98, 22, kBadgeBg);
@@ -430,20 +432,108 @@ struct LibraryView::Impl {
                     put_text("CARPETA INCOMPLETA", kRightX + 20, kRightY + 238, kWarningColor, 1, 20);
                 }
 
+                if (selected->detected) {
+                    const Engine engine = resolve_engine(model.home(), selected->id);
+                    const std::string engine_text = std::string("Motor: ") +
+                        engine_preference_label(load_engine_preference(model.home(), selected->id)) +
+                        (engine == Engine::Browser ? " (navegador)" : " (nativo)");
+                    put_text(engine_text, kRightX + 12, kRightY + 266, kInkBright, 1, 34);
+                    if (native_failed_last_time(model.home(), selected->id))
+                        put_text("El motor nativo fallo la ultima vez", kRightX + 12, kRightY + 286, kWarningColor, 1, 36);
+                }
+
                 if (!model.message().empty()) {
-                    put_wrapped(model.message(), kRightX + 12, kRightY + 266, kWarningColor, 32, 3, 1);
-                } else {
-                    put_text("B / Enter: Iniciar juego", kRightX + 12, kRightY + 272, kAccentColor, 1, 28);
-                    put_text("Select+Start: Volver / Salir", kRightX + 12, kRightY + 294, kInmMuted, 1, 30);
+                    put_wrapped(model.message(), kRightX + 12, kRightY + 308, kWarningColor, 32, 2, 1);
                 }
             }
         }
 
+        if (model.screen() == HubScreen::GameMenu && selected) draw_game_menu(model, *selected);
+        if (model.screen() == HubScreen::Controls) draw_controls(model);
+
         // Bottom Footer Bar
         draw_rect(renderer, 0, 444, kScreenWidth, 36, kSidebarBg);
         draw_rect(renderer, 0, 444, kScreenWidth, 1, kBorderColor);
-        put_text("Cruceta: Elegir    B / A: Jugar    R: Actualizar    Start: Salir",
-                 20, 454, kInkBright, 1, 72);
+        // "Btn inf." / "Btn der." name the face buttons by position, as A/B differ between devices.
+        const char* hints = "Btn inf.: abrir  Select: controles  R1: recargar  Btn der.: salir";
+        if (model.screen() == HubScreen::GameMenu)
+            hints = "Btn inf.: aceptar  Izq/Der: motor  Start: jugar  Btn der.: volver";
+        else if (model.screen() == HubScreen::Controls)
+            hints = "Izq/Der: tecla  Pulsa un boton: su fila  Btn der.: guardar";
+        put_text(hints, 14, 454, kInkBright, 1, 78);
+    }
+
+    void draw_panel(int x, int y, int w, int h, const std::string& title) {
+        draw_rect(renderer, 0, 54, kScreenWidth, 390, Color{0, 0, 0, 170});
+        draw_rect(renderer, x, y, w, h, kSidebarBg);
+        draw_rect_outline(renderer, x, y, w, h, kAccentColor);
+        draw_rect(renderer, x, y, w, 30, kCardBg);
+        put_text(title, x + 14, y + 8, kAccentColor, 1, (w - 28) / 8);
+    }
+
+    void draw_row(int x, int y, int w, bool selected_row, const std::string& left, const std::string& right,
+                  Color right_color = kAccentColor) {
+        if (selected_row) {
+            draw_rect(renderer, x, y, w, 24, kCardSelectedBg);
+            draw_rect(renderer, x, y, 3, 24, kAccentColor);
+        }
+        put_text(left, x + 12, y + 5, selected_row ? kInkBright : Color{200, 212, 226}, 1, 40);
+        if (!right.empty()) {
+            const std::string shown = selected_row ? "< " + right + " >" : right;
+            const int width = font.text_width(shown);
+            put_text(shown, x + w - 12 - width, y + 5, right_color, 1, 24);
+        }
+    }
+
+    void draw_game_menu(const LauncherModel& model, const GameEntry& game) {
+        constexpr int x = 120, y = 110, w = 400, h = 250;
+        draw_panel(x, y, w, h, game.title);
+        const Engine engine = resolve_engine(model.home(), game.id);
+        std::string engine_value = engine_preference_label(model.engine_preference());
+        if (model.engine_preference() == EnginePreference::Auto)
+            engine_value += engine == Engine::Browser ? ": navegador" : ": nativo";
+        const std::array<std::pair<std::string, std::string>, kGameMenuCount> rows{{
+            {"Jugar", ""},
+            {"Motor", engine_value},
+            {"Controles de este juego", ""},
+            {"Usar controles globales", ""},
+            {"Volver", ""},
+        }};
+        for (std::size_t i = 0; i < rows.size(); ++i)
+            draw_row(x + 10, y + 42 + static_cast<int>(i) * 30, w - 20, i == model.menu_index(),
+                     rows[i].first, rows[i].second);
+        const bool browser_missing = !model.browser_available();
+        std::string note = engine == Engine::Browser
+            ? "Navegador: Chromium real, maxima compatibilidad."
+            : "Nativo: rapido y ligero, 60 FPS.";
+        if (browser_missing && model.engine_preference() == EnginePreference::Browser)
+            note = "Falta NW.js en la carpeta nwjs/.";
+        put_text(note, x + 22, y + 200, browser_missing && engine == Engine::Browser ? kWarningColor : kInmMuted, 1, 46);
+        if (!model.message().empty()) put_text(model.message(), x + 22, y + 222, kWarningColor, 1, 46);
+    }
+
+    void draw_controls(const LauncherModel& model) {
+        constexpr int x = 40, y = 62, w = 560, h = 376;
+        draw_panel(x, y, w, h, model.editing_global_controls()
+                                   ? "Controles globales (boton -> tecla)"
+                                   : "Controles de " + (model.selected() ? model.selected()->title : std::string()));
+        // Two columns of eight buttons, then the reset row.
+        constexpr int kRowsPerColumn = 8;
+        constexpr int kColumnW = 270;
+        const auto& keys = key_table();
+        for (std::size_t b = 0; b < kPadButtonCount; ++b) {
+            const int column = static_cast<int>(b) / kRowsPerColumn;
+            const int row = static_cast<int>(b) % kRowsPerColumn;
+            const int index = model.controls().key_index[b];
+            draw_row(x + 8 + column * (kColumnW + 4), y + 40 + row * 34, kColumnW, b == model.menu_index(),
+                     pad_button_label(static_cast<PadButton>(b)),
+                     index >= 0 ? keys[static_cast<std::size_t>(index)].label : "---",
+                     index >= 0 ? kAccentColor : kInmMuted);
+        }
+        draw_row(x + 8, y + 40 + kRowsPerColumn * 34 + 6, w - 16, model.menu_index() == kPadButtonCount,
+                 "Restablecer valores por defecto", "");
+        put_text("MV: Enter=OK  Esc/X=Menu  Shift=Correr  RePag/AvPag=Personaje",
+                 x + 14, y + h - 22, kInmMuted, 1, 66);
     }
 };
 

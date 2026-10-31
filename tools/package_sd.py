@@ -9,7 +9,7 @@ import zipfile
 from verify_arm64 import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-README = '''RPG2LX 0.5.0 - Runtime 1:1 de RPG Maker MV para PortMaster (Linux ARM64)
+README = '''RPG2LX 0.6.0 - HUB de RPG Maker MV para PortMaster (Linux ARM64)
 
 INSTALAR
 1. Extrae RPG2LX.sh y la carpeta rpg2lx dentro de la carpeta ports de la SD
@@ -18,24 +18,24 @@ INSTALAR
    Se detectan tanto carpetas directas como exportaciones con subcarpeta www/.
 3. Expulsa la SD correctamente, colócala en la consola y abre RPG2LX desde Ports.
 
-CONTROLES EN CONSOLA (R36S / PortMaster)
-- Biblioteca: Cruceta/Stick elegir | B o A iniciar juego | R1 actualizar | Start salir.
-- En el juego (1:1 RPG Maker MV):
-  * B (botón Sur): Aceptar / Hablar / Confirmar
-  * A (botón Este) / X (Norte) / Start: Cancelar / Abrir y cerrar menú
-  * Y (botón Oeste): Correr (mantener)
-  * L1 / R1: Cambiar personaje en menús (PageUp / PageDown)
-  * Select + Start: Cerrar partida y volver a la biblioteca RPG2LX
+HUB (botones nombrados por posición, porque A/B cambian según la consola)
+- Cruceta/stick: elegir | Botón inferior: abrir juego | Botón derecho: volver/salir
+- Select: controles globales | R1: recargar biblioteca
+- Menú del juego: Jugar, Motor (Auto/Nativo/Navegador), controles propios del juego.
 
-CARACTERÍSTICAS 1:1
-- Ejecuta directamente los scripts originales del proyecto (rpg_core, rpg_managers,
-  rpg_objects, rpg_scenes, rpg_sprites, rpg_windows y plugins como CustomLogo.js).
-- Pantallas de presentación/logos, pantalla de título original, animaciones de ventanas,
-  cursores, diálogos con códigos de escape, seguidores, animaciones de base de datos,
-  batallas completas, audio Ogg/.rpgmvo con LOOPSTART/LOOPLENGTH y tipografía GameFont
-  adaptada con escalado nítido a pantallas 640x480.
-- Las partidas guardadas (.rpgsave) y opciones se guardan aisladas en rpg2lx/saves/<juego>/
-  sin modificar jamás los archivos originales del proyecto.
+MOTORES
+- Nativo: rápido y ligero. Ejecuta los scripts originales del juego.
+- Navegador: Chromium real (NW.js), para juegos con plugins que el nativo no soporta.
+  Usa el runtime Westonpack de PortMaster y necesita la carpeta rpg2lx/nwjs/.
+- Auto: nativo; si el nativo falla, la próxima vez usa el navegador (si está instalado).
+
+CONTROLES EN EL JUEGO
+Cada botón emula una tecla del teclado y se configura desde el HUB (global o por juego).
+Por defecto: inferior=Enter, derecho=Escape, izquierdo=Shift, superior=X, Start=Escape,
+Select=Tab, L1/R1=RePag/AvPag, L2=Ctrl, R2=Alt, cruceta/stick=flechas.
+Select + Start: cerrar el juego y volver al HUB.
+
+Las partidas (.rpgsave) se guardan en rpg2lx/saves/<juego>/ sin tocar los archivos del juego.
 
 SI NO ARRANCA
 Verifica que PortMaster esté instalado y que RPG2LX.sh esté junto a rpg2lx/.
@@ -48,7 +48,11 @@ def main():
     parser.add_argument('--binary', type=Path, default=ROOT / 'build/aarch64/rpg2lx.aarch64')
     parser.add_argument('--game', type=Path)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--nwjs', type=Path, help='Extracted NW.js linux-arm64 (tools/fetch_nwjs.py) for the browser engine')
     args = parser.parse_args()
+    nwjs = args.nwjs.resolve() if args.nwjs else None
+    if nwjs and not all((nwjs / f).is_file() for f in ('nw', 'VERSION.txt', 'EXECUTABLES.txt')):
+        parser.error('--nwjs must be a folder prepared by tools/fetch_nwjs.py')
     output = args.output.resolve()
     if not output.is_relative_to(ROOT / 'dist') or output.suffix != '.zip':
         parser.error('Output must be a new .zip inside this project dist/ directory')
@@ -90,12 +94,21 @@ def main():
         stb[stb.rfind('ALTERNATIVE A - MIT License'):].rstrip('*/\n ') + '\n', encoding='utf-8')
     shutil.copy2(ROOT / 'portmaster/port.json', runtime / 'port.json')
     (runtime / 'LEEME-SD.txt').write_text(README, encoding='utf-8')
+    executables = {'RPG2LX.sh', 'rpg2lx/rpg2lx.aarch64'}
+    if nwjs:
+        shutil.copytree(nwjs, runtime / 'nwjs')
+        executables.update('rpg2lx/nwjs/' + line.strip()
+                           for line in (nwjs / 'EXECUTABLES.txt').read_text(encoding='utf-8').splitlines()
+                           if line.strip())
+        if (nwjs / 'credits.html').is_file():
+            shutil.copy2(nwjs / 'credits.html', runtime / 'licenses' / 'NWjs-Chromium-credits.html')
     if game:
         if game.name in ('', '.', '..'):
             parser.error('Invalid game folder name')
         shutil.copytree(game, runtime / 'games' / game.name)
     (runtime / 'build-info.json').write_text(json.dumps({
-        'runtime_version': '0.5.0',
+        'runtime_version': '0.6.0',
+        'browser_engine': (nwjs / 'VERSION.txt').read_text(encoding='utf-8').strip() if nwjs else None,
         'platform': 'PortMaster Linux aarch64',
         'firmware_specific_code': False,
         'in_game_runtime_hud': False,
@@ -120,7 +133,7 @@ def main():
             else:
                 info = zipfile.ZipInfo(relative)
                 info.create_system = 3
-                mode = 0o755 if relative in ('RPG2LX.sh', 'rpg2lx/rpg2lx.aarch64') else 0o644
+                mode = 0o755 if relative in executables else 0o644
                 info.external_attr = (stat.S_IFREG | mode) << 16
                 info.compress_type = (
                     zipfile.ZIP_STORED

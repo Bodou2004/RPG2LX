@@ -7,9 +7,9 @@
   ],
   "items_opt": [],
   "attr": {
-    "title": "RPG2LX - RPG Maker MV Runtime",
-    "desc": "1:1 RPG Maker MV runtime for PortMaster: executes unmodified MV corescripts and plugins via QuickJS with GPU-accelerated SDL2 Tilemap/Sprite/Window rendering, TrueType GameFont typography, and Ogg/.rpgmvo audio.",
-    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. Saves (.rpgsave) and settings are kept isolated outside game assets.",
+    "title": "RPG2LX - RPG Maker MV HUB",
+    "desc": "HUB for RPG Maker MV games: a lightweight native engine (QuickJS + SDL2) that runs the original corescripts and plugins, plus an optional NW.js browser engine for games whose plugins need a real browser. Per-game engine choice and button-to-keyboard mapping.",
+    "inst": "Copy each complete RPG Maker MV game into its own folder inside ports/rpg2lx/games/. Direct projects and projects inside www/ are detected. The browser engine needs the rpg2lx/nwjs folder and PortMaster's Westonpack runtime. Saves (.rpgsave) and settings are kept outside game assets.",
     "genres": [
       "rpg"
     ],

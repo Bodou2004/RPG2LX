@@ -1,7 +1,10 @@
 #include "rpg2lx/core.hpp"
 #include "rpg2lx/map.hpp"
 #include "rpg2lx/launcher.hpp"
+#include <algorithm>
 #include <fstream>
+#include <initializer_list>
+#include <map>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -20,18 +23,72 @@ void print_help() {
     std::cout << "  rpg2lx inspect-map <map.json>  Validate map layers and event data\n";
     std::cout << "  rpg2lx launcher [--home DIR]  Open the game library (default command)\n";
     std::cout << "  rpg2lx list [--home DIR]      List folders detected in games/\n";
-    std::cout << "  rpg2lx run <MV export> [--home DIR] Open an existing MV project in place\n";
+    std::cout << "  rpg2lx run <MV export> [--home DIR] [--game-id ID] Open an existing MV project in place\n";
+    std::cout << "  rpg2lx hub --home DIR --request FILE  PortMaster HUB: writes the chosen game and exits 10\n";
+    std::cout << "  rpg2lx export-gptk --home DIR --game-id ID --output FILE  Controls for the browser engine\n";
+    std::cout << "  rpg2lx record-result --home DIR --game-id ID --engine native|browser --status N\n";
+}
+
+// Parses "--name value" pairs; returns false on an unknown or incomplete option.
+static bool parse_options(int argc, char* argv[], int first, std::map<std::string, std::string>& options,
+                          std::initializer_list<const char*> allowed) {
+    for (int i = first; i < argc; ++i) {
+        const std::string arg = argv[i];
+        const bool known = std::any_of(allowed.begin(), allowed.end(), [&](const char* a) { return arg == a; });
+        if (!known || i + 1 >= argc) {
+            std::cerr << "Invalid or incomplete option: " << arg << '\n';
+            return false;
+        }
+        options[arg] = argv[++i];
+    }
+    return true;
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.5.0 (1:1 RPG Maker MV Runtime)\n";
+    std::cout << "rpg2lx version 0.6.0 (RPG Maker MV HUB + runtime)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 
 static int rpg2lx_main(int argc, char* argv[]) {
     std::string command = argc < 2 ? "launcher" : argv[1];
 
-    if (command == "launcher" || command == "list" || command == "run") {
+    if (command == "export-gptk" || command == "record-result") {
+        std::map<std::string, std::string> options;
+        if (command == "export-gptk"
+                ? !parse_options(argc, argv, 2, options, {"--home", "--game-id", "--output"})
+                : !parse_options(argc, argv, 2, options, {"--home", "--game-id", "--engine", "--status"}))
+            return 1;
+        const auto home = options.count("--home") ? std::filesystem::u8path(options["--home"])
+                                                  : rpg2lx::executable_directory(argv[0]);
+        const auto game_id = options["--game-id"];
+        if (game_id.empty() || game_id.find_first_of("/\\") != std::string::npos || game_id == ".." ) {
+            std::cerr << "--game-id expects a game folder name\n";
+            return 1;
+        }
+        if (command == "export-gptk") {
+            if (options["--output"].empty()) {
+                std::cerr << "--output is required\n";
+                return 1;
+            }
+            std::string error;
+            if (!rpg2lx::load_effective_profile(home, game_id).write_gptk(std::filesystem::u8path(options["--output"]), error)) {
+                std::cerr << error << '\n';
+                return 2;
+            }
+            return 0;
+        }
+        const auto& status = options["--status"];
+        if (status.empty() || status.find_first_not_of("0123456789") != std::string::npos) {
+            std::cerr << "--status expects a process exit code\n";
+            return 1;
+        }
+        rpg2lx::record_run_result(home, game_id,
+                                  options["--engine"] == "browser" ? rpg2lx::Engine::Browser : rpg2lx::Engine::Native,
+                                  std::stoi(status));
+        return 0;
+    }
+
+    if (command == "launcher" || command == "list" || command == "run" || command == "hub") {
         try {
             if (command == "run" && argc < 3) {
                 std::cerr << "run requires an existing MV project path\n";
@@ -42,10 +99,14 @@ static int rpg2lx_main(int argc, char* argv[]) {
             int smoke_frames = 0;
             bool start_first = false;
             std::string screenshot;
+            std::filesystem::path request_file;
+            std::string game_id;
             for (int i = command == "run" ? 3 : 2; i < argc; ++i) {
                 const std::string arg = argv[i];
                 if (arg == "--home" && i + 1 < argc) home = std::filesystem::u8path(argv[++i]);
-                else if (command == "launcher" && arg == "--start-first") start_first = true;
+                else if (command == "hub" && arg == "--request" && i + 1 < argc) request_file = std::filesystem::u8path(argv[++i]);
+                else if (command == "run" && arg == "--game-id" && i + 1 < argc) game_id = argv[++i];
+                else if ((command == "launcher" || command == "hub") && arg == "--start-first") start_first = true;
                 else if (command != "list" && arg == "--smoke-frames" && i + 1 < argc) {
                     const std::string number = argv[++i];
                     if (number.empty() || number.find_first_not_of("0123456789") != std::string::npos)
@@ -57,6 +118,10 @@ static int rpg2lx_main(int argc, char* argv[]) {
                     std::cerr << "Invalid or incomplete launcher option: " << arg << '\n';
                     return 1;
                 }
+            }
+            if (command == "hub" && request_file.empty()) {
+                std::cerr << "hub requires --request FILE\n";
+                return 1;
             }
             if (!screenshot.empty() && smoke_frames == 0) {
                 std::cerr << "--screenshot requires --smoke-frames\n";
@@ -93,7 +158,8 @@ static int rpg2lx_main(int argc, char* argv[]) {
                     std::cerr.rdbuf(err);
                 }
             } redirect(log);
-            return rpg2lx::run_launcher(library, smoke_frames, screenshot, start_first, direct_project);
+            return rpg2lx::run_launcher(library, smoke_frames, screenshot, start_first, direct_project,
+                                        request_file, game_id);
         } catch (const std::exception& e) {
             std::cerr << "Launcher: " << e.what() << '\n';
             return 1;

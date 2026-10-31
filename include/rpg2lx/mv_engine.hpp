@@ -33,6 +33,8 @@ public:
     void shutdown();
 
     void set_button(const std::string& mv_key_name, bool pressed);
+    // Emulated keyboard: dispatched as DOM keydown/keyup, so Input.keyMapper and plugins see it.
+    void set_key(int dom_key_code, bool pressed);
     void clear_inputs();
     void on_pointer_move(int game_x, int game_y);
     void on_pointer_down(int game_x, int game_y, bool right_button = false);

@@ -99,8 +99,39 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
     global.innerHeight = 624;
     global.pageXOffset = 0;
     global.pageYOffset = 0;
-    global.addEventListener = function() {};
-    global.removeEventListener = function() {};
+    // Minimal DOM EventTarget so MV's Input/TouchInput and plugin key listeners actually receive events
+    global.__makeEventTarget = function(target) {
+        var listeners = {};
+        target.addEventListener = function(type, fn) {
+            if (typeof fn !== 'function' && !(fn && typeof fn.handleEvent === 'function')) return;
+            var list = listeners[type] || (listeners[type] = []);
+            if (list.indexOf(fn) < 0) list.push(fn);
+        };
+        target.removeEventListener = function(type, fn) {
+            var list = listeners[type];
+            if (!list) return;
+            var i = list.indexOf(fn);
+            if (i >= 0) list.splice(i, 1);
+        };
+        target.dispatchEvent = function(event) {
+            var list = listeners[event.type];
+            if (!list) return true;
+            event.target = event.target || target;
+            event.currentTarget = target;
+            var snapshot = list.slice();
+            for (var i = 0; i < snapshot.length && !event._stopImmediate; i++) {
+                try {
+                    if (typeof snapshot[i] === 'function') snapshot[i].call(target, event);
+                    else snapshot[i].handleEvent(event);
+                } catch (e) {
+                    __rpg2lx.reportError(e && e.stack ? String(e.stack) : String(e));
+                }
+            }
+            return !event.defaultPrevented;
+        };
+        return target;
+    };
+    global.__makeEventTarget(global);
 
     global.location = {
         href: 'file:///game/index.html',
@@ -327,10 +358,9 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
             if (t === 'body') return [__body];
             if (t === 'script') return [{ src: 'js/rpg_core.js' }];
             return [];
-        },
-        addEventListener: function() {},
-        removeEventListener: function() {}
+        }
     };
+    global.__makeEventTarget(global.document);
 
     // XMLHttpRequest backed by C++ project file reader
     function XMLHttpRequest() {
@@ -1358,6 +1388,34 @@ inline constexpr const char* kMvPostManagersPatchJs = R"JS(
         } else {
             Input._currentState[name] = false;
         }
+    };
+    // Keyboard injection as real DOM events: goes through Input.keyMapper (including plugin
+    // remaps) and reaches any plugin keydown/keyup listener, exactly like in NW.js.
+    var __keyNames = { 8: 'Backspace', 9: 'Tab', 13: 'Enter', 16: 'Shift', 17: 'Control', 18: 'Alt',
+        27: 'Escape', 32: ' ', 33: 'PageUp', 34: 'PageDown', 37: 'ArrowLeft', 38: 'ArrowUp',
+        39: 'ArrowRight', 40: 'ArrowDown', 45: 'Insert', 46: 'Delete' };
+    global.__rpg2lxKey = function(keyCode, pressed) {
+        var name = __keyNames[keyCode];
+        if (!name) {
+            if (keyCode >= 112 && keyCode <= 123) name = 'F' + (keyCode - 111);
+            else name = String.fromCharCode(keyCode).toLowerCase();
+        }
+        var event = {
+            type: pressed ? 'keydown' : 'keyup',
+            keyCode: keyCode, which: keyCode, key: name,
+            code: name.length === 1 ? (keyCode >= 48 && keyCode <= 57 ? 'Digit' + name : 'Key' + name.toUpperCase()) : name,
+            ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, repeat: false,
+            defaultPrevented: false, _stopImmediate: false,
+            preventDefault: function() { this.defaultPrevented = true; },
+            stopPropagation: function() {},
+            stopImmediatePropagation: function() { this._stopImmediate = true; }
+        };
+        if (pressed && keyCode === 13 && ResourceHandler && ResourceHandler.exists && ResourceHandler.exists()) {
+            ResourceHandler.retry();
+            return;
+        }
+        global.document.dispatchEvent(event);
+        if (!event._stopImmediate) global.dispatchEvent(event);
     };
     global.__rpg2lxClearInput = function() {
         Input.clear();

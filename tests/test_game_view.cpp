@@ -39,7 +39,23 @@ int main(int argc,char** argv) {
         select("save");capture("save.bmp");s.confirm();require(s.scene()==GameScene::Map&&s.has_save(1),"Save scene writes slot");
         s.show_title();s.navigate(2);s.confirm();require(s.scene()==GameScene::Load,"Continue opens files");s.confirm();
         require(s.scene()==GameScene::Map&&s.x()==x&&s.y()==y,"Continue restores saved position");
-        GameLibrary lib(temp/"library");LauncherModel model(lib);LibraryView library(r.get());SDL_RenderSetLogicalSize(r.get(),640,480);library.draw(model);
+        GameLibrary lib(temp/"library");require(lib.initialize(error),error);
+        fs::copy(fs::u8path(argv[1]),lib.games_path()/"Demo",fs::copy_options::recursive);
+        LauncherModel model(lib);LibraryView library(r.get());
+        // HUB screens: library, game menu and controls editor.
+        auto hub_capture=[&](const char* name) {
+            SDL_RenderSetLogicalSize(r.get(),640,480);SDL_SetRenderDrawColor(r.get(),0,0,0,255);SDL_RenderClear(r.get());library.draw(model);
+            int ow=0,oh=0;SDL_GetRendererOutputSize(r.get(),&ow,&oh);
+            auto* image=SDL_CreateRGBSurfaceWithFormat(0,ow,oh,32,SDL_PIXELFORMAT_ARGB8888);require(image!=nullptr,SDL_GetError());
+            const int read=SDL_RenderReadPixels(r.get(),nullptr,image->format->format,image->pixels,image->pitch);
+            const int saved=read==0?SDL_SaveBMP(image,(out/name).u8string().c_str()):-1;SDL_FreeSurface(image);require(saved==0,SDL_GetError());
+        };
+        require(model.games().size()==1&&model.games()[0].detected,"HUB lists the copied game");
+        hub_capture("hub_library.bmp");
+        model.act(MenuAction::Confirm);require(model.screen()==HubScreen::GameMenu,"HUB game menu");
+        model.act(MenuAction::Down);hub_capture("hub_game_menu.bmp");
+        model.act(MenuAction::Back);model.act(MenuAction::OpenControls);require(model.screen()==HubScreen::Controls,"HUB controls");
+        model.pad_pressed(PadButton::L1);hub_capture("hub_controls.bmp");
         std::cout<<"Title, original assets, menu, equipment and save/load rendering passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

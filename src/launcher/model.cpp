@@ -4,8 +4,80 @@
 #include "rpg2lx/project_source.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <fstream>
 
 namespace rpg2lx {
+namespace {
+
+std::filesystem::path game_config_dir(const std::filesystem::path& home, const std::string& game_id) {
+    return home / "config" / "games" / std::filesystem::u8path(game_id);
+}
+
+std::string read_first_line(const std::filesystem::path& file) {
+    std::ifstream in(file);
+    std::string line;
+    std::getline(in, line);
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+    return line;
+}
+
+bool write_line(const std::filesystem::path& file, const std::string& text) {
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream out(file, std::ios::trunc);
+    out << text << '\n';
+    return static_cast<bool>(out);
+}
+
+} // namespace
+
+const char* engine_preference_label(EnginePreference preference) {
+    switch (preference) {
+        case EnginePreference::Native: return "Nativo";
+        case EnginePreference::Browser: return "Navegador";
+        default: return "Auto";
+    }
+}
+
+EnginePreference load_engine_preference(const std::filesystem::path& home, const std::string& game_id) {
+    const auto value = read_first_line(game_config_dir(home, game_id) / "engine.txt");
+    if (value == "native") return EnginePreference::Native;
+    if (value == "browser") return EnginePreference::Browser;
+    return EnginePreference::Auto;
+}
+
+bool save_engine_preference(const std::filesystem::path& home, const std::string& game_id, EnginePreference preference) {
+    const char* value = preference == EnginePreference::Native ? "native"
+                      : preference == EnginePreference::Browser ? "browser" : "auto";
+    return write_line(game_config_dir(home, game_id) / "engine.txt", value);
+}
+
+bool native_failed_last_time(const std::filesystem::path& home, const std::string& game_id) {
+    return read_first_line(game_config_dir(home, game_id) / "native_result.txt") == "failed";
+}
+
+void record_run_result(const std::filesystem::path& home, const std::string& game_id, Engine engine, int status) {
+    // Only native results matter for Auto; a browser failure says nothing about native support.
+    if (engine != Engine::Native) return;
+    write_line(game_config_dir(home, game_id) / "native_result.txt", status == 0 ? "ok" : "failed");
+}
+
+bool browser_engine_installed(const std::filesystem::path& home) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(home / "nwjs" / "nw", ec) ||
+           std::filesystem::is_regular_file(home / "nwjs" / "nw.exe", ec);
+}
+
+Engine resolve_engine(const std::filesystem::path& home, const std::string& game_id) {
+    switch (load_engine_preference(home, game_id)) {
+        case EnginePreference::Native: return Engine::Native;
+        case EnginePreference::Browser: return Engine::Browser;
+        default:
+            return native_failed_last_time(home, game_id) && browser_engine_installed(home)
+                       ? Engine::Browser : Engine::Native;
+    }
+}
+
 LauncherModel::LauncherModel(GameLibrary& library) : library_(library) { refresh(); }
 
 const GameEntry* LauncherModel::selected() const {
@@ -43,6 +115,7 @@ bool LauncherModel::open_project(const std::filesystem::path& project, bool titl
         session_.reset();
         mv_project_ = root;
         mv_save_dir_ = save_dir;
+        mv_game_id_ = save_id;
         message_.clear();
         return true;
     }
@@ -76,8 +149,73 @@ void LauncherModel::refresh() {
             retained = true;
         }
     }
-    if (!retained) details_ = false;
+    if (!retained && screen_ == HubScreen::GameMenu) screen_ = HubScreen::Library;
     message_.clear();
+}
+
+void LauncherModel::play_selected() {
+    const auto* game = selected();
+    if (!game || !game->detected) {
+        message_ = "Carpeta incompleta. Revisa los archivos del juego.";
+        return;
+    }
+    std::string error;
+    if (!library_.prepare_game(*game, error)) {
+        message_ = "No se pudo iniciar: " + error;
+        Logger::error(message_);
+        return;
+    }
+    const Engine engine = resolve_engine(library_.home(), game->id);
+    if (engine == Engine::Browser && !browser_engine_installed(library_.home())) {
+        message_ = "Motor navegador no instalado (carpeta nwjs/).";
+        return;
+    }
+    if (engine == Engine::Native && !MvEngine::is_supported_project(game->project)) {
+        message_ = "Faltan js/rpg_*.js: este juego no se puede ejecutar.";
+        if (!hub_mode_) open_project(game->project);
+        return;
+    }
+    if (hub_mode_) {
+        const auto resolved = resolve_mv_project(game->project);
+        launch_request_ = LaunchRequest{engine, resolved ? resolved.source->root : game->project, game->id};
+        quit_ = true;
+        return;
+    }
+    if (engine == Engine::Browser) {
+        message_ = "El modo navegador solo funciona desde PortMaster.";
+        return;
+    }
+    open_project(game->project);
+}
+
+void LauncherModel::open_controls(const std::string& game_id) {
+    controls_game_id_ = game_id;
+    controls_ = load_effective_profile(library_.home(), game_id);
+    controls_return_ = screen_;
+    screen_ = HubScreen::Controls;
+    menu_index_ = 0;
+    message_.clear();
+}
+
+void LauncherModel::close_controls() {
+    std::string error;
+    const auto file = controls_game_id_.empty() ? global_controls_file(library_.home())
+                                                : game_controls_file(library_.home(), controls_game_id_);
+    message_ = controls_.save(file, error) ? "Controles guardados." : error;
+    screen_ = controls_return_;
+    menu_index_ = controls_return_ == HubScreen::GameMenu ? static_cast<std::size_t>(GameMenuItem::GameControls) : 0;
+}
+
+void LauncherModel::pad_pressed(PadButton button) {
+    if (screen_ != HubScreen::Controls) return;
+    // Navigation buttons keep their meaning; the rest jump to their own row.
+    switch (button) {
+        case PadButton::South: case PadButton::East:
+        case PadButton::Up: case PadButton::Down: case PadButton::Left: case PadButton::Right:
+            return;
+        default:
+            menu_index_ = static_cast<std::size_t>(button);
+    }
 }
 
 void LauncherModel::act(MenuAction action) {
@@ -85,6 +223,7 @@ void LauncherModel::act(MenuAction action) {
         if (action == MenuAction::CloseSession) {
             mv_project_.clear();
             mv_save_dir_.clear();
+            mv_game_id_.clear();
             message_.clear();
         }
         return;
@@ -98,49 +237,73 @@ void LauncherModel::act(MenuAction action) {
         if (session_ && session_->wants_library()) { session_.reset(); message_.clear(); }
         return;
     }
-    if (action == MenuAction::Refresh) { refresh(); return; }
-    if (action == MenuAction::Back) {
-        if (details_) { details_ = false; message_.clear(); }
-        else quit_ = true;
+
+    if (screen_ == HubScreen::Controls) {
+        if (action == MenuAction::Up) menu_index_ = (menu_index_ + kControlsRowCount - 1) % kControlsRowCount;
+        else if (action == MenuAction::Down) menu_index_ = (menu_index_ + 1) % kControlsRowCount;
+        else if ((action == MenuAction::Left || action == MenuAction::Right) && menu_index_ < kPadButtonCount)
+            controls_.cycle(static_cast<PadButton>(menu_index_), action == MenuAction::Left ? -1 : 1);
+        else if (action == MenuAction::Confirm && menu_index_ == kPadButtonCount) {
+            controls_ = ControlProfile::defaults();
+            message_ = "Controles por defecto.";
+        } else if (action == MenuAction::Confirm && menu_index_ < kPadButtonCount)
+            controls_.cycle(static_cast<PadButton>(menu_index_), 1);
+        else if (action == MenuAction::Back || action == MenuAction::OpenControls) close_controls();
         return;
     }
-    if (action == MenuAction::Up && !details_ && !games_.empty())
-        index_ = index_ == 0 ? games_.size() - 1 : index_ - 1;
-    if (action == MenuAction::Down && !details_ && !games_.empty())
-        index_ = (index_ + 1) % games_.size();
-    if (action == MenuAction::Play && selected() && selected()->detected) {
-        std::string error;
-        if (!library_.prepare_game(*selected(), error)) {
-            message_ = "No se pudo iniciar: " + error;
-            Logger::error(message_);
-            return;
+
+    if (screen_ == HubScreen::GameMenu) {
+        const auto* game = selected();
+        if (!game) { screen_ = HubScreen::Library; return; }
+        const auto item = static_cast<GameMenuItem>(menu_index_);
+        if (action == MenuAction::Up) menu_index_ = (menu_index_ + kGameMenuCount - 1) % kGameMenuCount;
+        else if (action == MenuAction::Down) menu_index_ = (menu_index_ + 1) % kGameMenuCount;
+        else if (action == MenuAction::Back) { screen_ = HubScreen::Library; message_.clear(); }
+        else if (action == MenuAction::Play) play_selected();
+        else if (item == GameMenuItem::Engine &&
+                 (action == MenuAction::Left || action == MenuAction::Right || action == MenuAction::Confirm)) {
+            const int step = action == MenuAction::Left ? 2 : 1;
+            engine_preference_ = static_cast<EnginePreference>((static_cast<int>(engine_preference_) + step) % 3);
+            save_engine_preference(library_.home(), game->id, engine_preference_);
+            message_.clear();
+        } else if (action == MenuAction::Confirm) {
+            switch (item) {
+                case GameMenuItem::Play: play_selected(); break;
+                case GameMenuItem::GameControls: open_controls(game->id); break;
+                case GameMenuItem::ResetGameControls: {
+                    std::error_code ec;
+                    std::filesystem::remove(game_controls_file(library_.home(), game->id), ec);
+                    message_ = "Este juego usa ahora los controles globales.";
+                    break;
+                }
+                case GameMenuItem::Back: screen_ = HubScreen::Library; message_.clear(); break;
+                default: break;
+            }
         }
-        open_project(selected()->project);
         return;
     }
+
+    // Library
+    if (action == MenuAction::Refresh) { refresh(); return; }
+    if (action == MenuAction::OpenControls) { open_controls({}); return; }
+    if (action == MenuAction::Back) { quit_ = true; return; }
+    if (action == MenuAction::Up && !games_.empty()) {
+        index_ = index_ == 0 ? games_.size() - 1 : index_ - 1;
+        message_.clear();
+    }
+    if (action == MenuAction::Down && !games_.empty()) {
+        index_ = (index_ + 1) % games_.size();
+        message_.clear();
+    }
+    if (action == MenuAction::Play) { play_selected(); return; }
     if (action != MenuAction::Confirm || !selected()) return;
     if (!selected()->detected) {
         message_ = "Carpeta incompleta. Revisa los archivos del juego.";
         return;
     }
-    if (!details_) {
-        details_ = true;
-        message_.clear();
-        return;
-    }
-    const auto report = ProjectInspector::inspect(selected()->project.u8string());
-    if (!report.is_valid) {
-        message_ = "Hay errores en los datos. Consulta logs/launcher.log.";
-        for (const auto& text : report.missing_files) Logger::error("Missing: " + text);
-        for (const auto& text : report.warnings) Logger::error(text);
-        return;
-    }
-    std::string error;
-    if (!library_.prepare_game(*selected(), error)) { message_ = error; return; }
-    if (MvEngine::is_supported_project(selected()->project)) {
-        open_project(selected()->project);
-        return;
-    }
-    message_ = "Datos comprobados. El motor de juego sigue en desarrollo.";
+    screen_ = HubScreen::GameMenu;
+    menu_index_ = 0;
+    engine_preference_ = load_engine_preference(library_.home(), selected()->id);
+    message_.clear();
 }
 } // namespace rpg2lx
