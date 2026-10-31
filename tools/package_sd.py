@@ -59,6 +59,7 @@ def main():
         'Zig-LICENSE.txt': toolchain / 'LICENSE',
         'font8x8-README.txt': ROOT / 'third_party/font8x8/README',
         'QuickJS-LICENSE.txt': ROOT / 'third_party/quickjs/LICENSE',
+        'canvas_ity-LICENSE.txt': ROOT / 'third_party/canvas_ity/LICENSE',
     }
     for source in licenses.values():
         if not source.is_file():
