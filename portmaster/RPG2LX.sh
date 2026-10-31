@@ -100,10 +100,14 @@ mount_weston() {
 run_browser() {
     local project="$1" game_id="$2"
     local nw="$GAMEDIR/nwjs/nw"
-    if [ ! -x "$nw" ]; then
+    if [ ! -f "$nw" ]; then
         echo "ERROR: NW.js not installed in $GAMEDIR/nwjs (see docs/ENGINES.md)"
         return 2
     fi
+    # Copying to the SD from Windows drops exec bits.
+    while read -r exe; do
+        [ -n "$exe" ] && chmod +x "$GAMEDIR/nwjs/$exe" 2>/dev/null
+    done < "$GAMEDIR/nwjs/EXECUTABLES.txt"
     local app="$CONFDIR/games/$game_id/nwapp"
     mkdir -p "$app" "$CONFDIR/games/$game_id/chromium"
     # Wrapper app: the game folder is never modified (an empty package.json "name" breaks NW.js).

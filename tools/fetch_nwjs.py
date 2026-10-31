@@ -16,7 +16,9 @@ KEEP_LOCALES = {'en-US.pak', 'es.pak', 'es-419.pak'}
 
 
 def download(url, destination):
-    with urllib.request.urlopen(url) as response, destination.open('wb') as out:
+    # dl.nwjs.io answers 403 to urllib's default User-Agent.
+    request = urllib.request.Request(url, headers={'User-Agent': 'rpg2lx-fetch-nwjs/1.0'})
+    with urllib.request.urlopen(request) as response, destination.open('wb') as out:
         shutil.copyfileobj(response, out, length=1 << 20)
 
 
