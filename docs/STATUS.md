@@ -1,6 +1,21 @@
 # Estado de RPG2LX
 
-2026-10-31 — versión 0.7.0.
+2026-10-31 — versión 0.7.2.
+
+## Rendimiento (0.7.2)
+
+- Salto de frames como `SceneManager.updateMain`: si el dispositivo no llega a 60 FPS, cada frame dibujado hace hasta 4 actualizaciones de lógica. El juego mantiene su velocidad real en vez de ir a cámara lenta; solo baja la fluidez del dibujo.
+- Vsync adaptativo: mientras el juego va lento el vsync se apaga, para no perder hasta un refresco entero esperando al siguiente vblank en cada frame; se vuelve a activar cuando el juego recupera 60 FPS. Necesita SDL 2.0.18 o posterior en el dispositivo; con uno más antiguo el vsync se queda como estaba.
+- La línea `perf:` del log añade `game speed`: el porcentaje de la velocidad real a la que corre el juego.
+- Medido en PC (SAOR DOMINA, mapa, caminando, renderizador GPU): ~13 ms de lógica por actualización y ~1 ms de dibujo. Casi todo es JavaScript de sus plugins; las llamadas al motor nativo suman menos de 0,5 ms por frame. Los picos de 1 s del probe solo existen con el renderizador por software de SDL.
+
+## Rendimiento (0.7.1)
+
+- Las imágenes se decodifican en hilos aparte: cargar un mapa o un menú ya no congela el frame.
+- La caché de tiles del mapa solo repinta las filas y columnas que entran al hacer scroll, y en cada paso de la animación del agua solo las celdas animadas.
+- `RPG2LX.sh` pone el gobernador de CPU en `performance` mientras corre un juego y restaura el anterior al salir.
+- `logs/launcher.log` registra cada 10 s una línea `perf:` con fps, ms de juego (lógica + dibujo) por frame y el peor frame.
+- Medido en PC con SAOR DOMINA en el mapa: ~8,7 ms de JavaScript por frame, y el ~60 % es código de sus plugins (HUD, colisiones, menú). En una K36 (RK3326, Cortex-A35) eso no llega a 60 fps con un intérprete.
 
 ## Qué hay
 

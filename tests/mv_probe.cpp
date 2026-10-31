@@ -1,12 +1,13 @@
 // Drives a real MV project headlessly to find compatibility problems.
 // Usage: mv_probe <project> <out_dir> <script>
 // Script lines: "frames N", "key CODE [HOLD]", "js EXPR", "print EXPR", "shot NAME",
-// "until EXPR MAXFRAMES". Any JS error stops the probe with exit code 1.
+// "until EXPR MAXFRAMES", "stats LABEL" (prints and resets the frame timings). Any JS error stops the probe with exit code 1.
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include "rpg2lx/mv_engine.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -24,11 +25,15 @@ int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) return 2;
     SDL_InitSubSystem(SDL_INIT_AUDIO);
     SDL_Window* win = SDL_CreateWindow("probe", 0, 0, 816, 624, SDL_WINDOW_HIDDEN);
-    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    // RPG2LX_PROBE_GPU uses the accelerated renderer, as the console does, instead of the software one.
+    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, std::getenv("RPG2LX_PROBE_GPU")
+        ? (SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE) : SDL_RENDERER_SOFTWARE);
     const fs::path out = fs::u8path(argv[2]);
     fs::create_directories(out / "saves");
 
     rpg2lx::MvEngine engine;
+    // Frame-count scripts need images on the frame they were asked for; RPG2LX_ASYNC_IMAGES=1 measures the real path.
+    engine.set_blocking_image_decode(std::getenv("RPG2LX_ASYNC_IMAGES") == nullptr);
     std::string err;
     const auto t_boot = std::chrono::steady_clock::now();
     if (!engine.boot(fs::u8path(argv[1]), out / "saves", ren, 640, 480, err)) {
@@ -38,17 +43,21 @@ int main(int argc, char** argv) {
     std::cout << "boot " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_boot).count() << " ms\n";
 
     double total_ms = 0, worst_ms = 0;
-    long frames = 0;
+    long frames = 0, slow = 0;
+    // RPG2LX_UPDATES=N runs N logic updates per drawn frame, as the launcher does to catch up on a slow device.
+    const char* updates_env = std::getenv("RPG2LX_UPDATES");
+    const int updates = updates_env ? std::max(1, std::atoi(updates_env)) : 1;
     auto step = [&](int n) {
         for (int i = 0; i < n; ++i) {
             const auto t0 = std::chrono::steady_clock::now();
-            if (!engine.step_and_render(err)) {
+            if (!engine.step_and_render(err, updates)) {
                 std::cerr << "RUNTIME ERROR at frame " << engine.frame_count() << ":\n" << err << '\n';
                 return false;
             }
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             total_ms += ms;
             worst_ms = std::max(worst_ms, ms);
+            if (ms > 25.0) ++slow;
             ++frames;
         }
         return true;
@@ -97,6 +106,12 @@ int main(int argc, char** argv) {
         } else if (cmd == "js") ok = js(rest, result);
         else if (cmd == "print") { ok = js(rest, result); std::cout << "[" << line_no << "] " << rest << " => " << result << '\n'; }
         else if (cmd == "shot") shot(rest);
+        else if (cmd == "stats") {
+            std::cout << "[" << rest << "] frames " << frames << " avg " << (frames ? total_ms / frames : 0)
+                      << " ms worst " << worst_ms << " ms over25 " << slow << '\n';
+            total_ms = worst_ms = 0;
+            frames = slow = 0;
+        }
         else if (cmd == "until") {
             const auto space = rest.rfind(' ');
             const std::string expr = rest.substr(0, space);

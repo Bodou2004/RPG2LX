@@ -9,6 +9,7 @@
 #include "rpg2lx/map_view.hpp"
 #include "rpg2lx/mv_engine.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <array>
 #include <cmath>
 #include <fstream>
@@ -23,6 +24,21 @@ constexpr int kDefaultHeight = 480;
 constexpr int kStickThreshold = 16000;
 // Exit code that tells RPG2LX.sh the HUB wrote a launch request.
 constexpr int kLaunchRequested = 10;
+
+// Turns vsync on or off on a live renderer. SDL_RenderSetVSync exists from SDL 2.0.18 and the console's SDL may
+// be older, so it is looked up at run time; false when it is missing or fails.
+bool set_render_vsync(SDL_Renderer* renderer, bool on) {
+    using SetVSync = int (SDLCALL*)(SDL_Renderer*, int);
+    static const SetVSync fn = [] {
+#ifdef _WIN32
+        void* lib = SDL_LoadObject("SDL2.dll");
+#else
+        void* lib = SDL_LoadObject("libSDL2-2.0.so.0");
+#endif
+        return lib ? reinterpret_cast<SetVSync>(SDL_LoadFunction(lib, "SDL_RenderSetVSync")) : nullptr;
+    }();
+    return fn && fn(renderer, on ? 1 : 0) == 0;
+}
 
 SDL_Rect compute_aspect_viewport(int out_w, int out_h, int game_w, int game_h) {
     if (out_w <= 0 || out_h <= 0 || game_w <= 0 || game_h <= 0) {
@@ -166,6 +182,10 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     SDL_RendererInfo rinfo{};
     SDL_GetRendererInfo(renderer.get(), &rinfo);
     const bool has_vsync = (smoke_frames == 0) && ((rinfo.flags & SDL_RENDERER_PRESENTVSYNC) != 0);
+    // A game slower than 60 FPS would also wait for the next vblank on every present, losing up to a whole refresh
+    // per frame; vsync goes off while the game is slow and back on when it keeps up again.
+    bool vsync_on = has_vsync;
+    double step_avg_ms = 0.0;
     const bool supports_target_tex = (rinfo.flags & SDL_RENDERER_TARGETTEXTURE) != 0;
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
@@ -269,6 +289,16 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     Uint32 last_axis = 0;
     Uint32 previous_time = SDL_GetTicks();
     const double perf_freq = static_cast<double>(SDL_GetPerformanceFrequency());
+    // Frame timings of the running game, written to the log every 10 seconds so a slow device can be measured.
+    double perf_step_ms = 0.0, perf_frame_ms = 0.0, perf_worst_ms = 0.0;
+    int perf_frames = 0;
+    // Game time the running MV game is behind real time. A device too slow for 60 FPS runs up to kMaxCatchUp logic
+    // updates per drawn frame, so the game keeps its real speed and only the drawing is skipped.
+    constexpr double kTargetFrameMs = 1000.0 / 60.0;
+    constexpr int kMaxCatchUp = 4;
+    int perf_updates = 0;
+    double mv_owed_ms = 0.0;
+    Uint64 mv_last_pc = 0;
 
     while (running && !model.quit()) {
         const Uint64 frame_start_pc = SDL_GetPerformanceCounter();
@@ -377,6 +407,7 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                 int out_w = kDefaultWidth, out_h = kDefaultHeight;
                 SDL_GetRendererOutputSize(renderer.get(), &out_w, &out_h);
                 auto next_mv = std::make_unique<MvEngine>();
+                next_mv->set_blocking_image_decode(smoke_frames > 0);
                 std::string boot_err;
                 if (!next_mv->boot(model.mv_project(), model.mv_save_dir(), renderer.get(), out_w, out_h, boot_err)) {
                     Logger::error("MV boot failed: " + boot_err);
@@ -431,10 +462,20 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 
                     std::string step_err;
                     bool step_ok = false;
+                    const Uint64 step_start_pc = SDL_GetPerformanceCounter();
+                    int updates = 1;
+                    if (smoke_frames == 0 && mv_last_pc != 0) {
+                        mv_owed_ms += static_cast<double>(step_start_pc - mv_last_pc) * 1000.0 / perf_freq;
+                        // Below 1.5 frames behind is vsync jitter, not a slow device.
+                        if (mv_owed_ms >= kTargetFrameMs * 1.5)
+                            updates = std::min(kMaxCatchUp, static_cast<int>(mv_owed_ms / kTargetFrameMs));
+                        mv_owed_ms = updates == kMaxCatchUp ? 0.0 : std::max(0.0, mv_owed_ms - updates * kTargetFrameMs);
+                    }
+                    mv_last_pc = step_start_pc;
                     if (mv_canvas_tex) {
                         SDL_RenderSetLogicalSize(renderer.get(), 0, 0);
                         SDL_SetRenderTarget(renderer.get(), mv_canvas_tex);
-                        step_ok = mv_engine->step_and_render(step_err);
+                        step_ok = mv_engine->step_and_render(step_err, updates);
                         SDL_SetRenderTarget(renderer.get(), nullptr);
 
                         int out_w = kDefaultWidth, out_h = kDefaultHeight;
@@ -445,7 +486,16 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
                         SDL_RenderCopy(renderer.get(), mv_canvas_tex, nullptr, &vp);
                     } else {
                         SDL_RenderSetLogicalSize(renderer.get(), gw, gh);
-                        step_ok = mv_engine->step_and_render(step_err);
+                        step_ok = mv_engine->step_and_render(step_err, updates);
+                    }
+                    perf_step_ms += static_cast<double>(SDL_GetPerformanceCounter() - step_start_pc) * 1000.0 / perf_freq;
+                    ++perf_frames;
+                    perf_updates += updates;
+                    if (has_vsync) {
+                        const double ms = static_cast<double>(SDL_GetPerformanceCounter() - step_start_pc) * 1000.0 / perf_freq;
+                        step_avg_ms = step_avg_ms * 0.9 + (ms / updates) * 0.1;
+                        const bool want = step_avg_ms < 12.0 || (vsync_on && step_avg_ms < 15.0);
+                        if (want != vsync_on && set_render_vsync(renderer.get(), want)) vsync_on = want;
                     }
 
                     if (!step_ok) {
@@ -541,10 +591,32 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 
         SDL_RenderPresent(renderer.get());
 
+        if (in_mv && mv_engine && perf_frames > 0) {
+            const double frame_ms = static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0 / perf_freq;
+            perf_frame_ms += frame_ms;
+            perf_worst_ms = std::max(perf_worst_ms, frame_ms);
+            if (perf_frames >= 600) {
+                char line[200];
+                std::snprintf(line, sizeof line,
+                              "perf: %.1f fps drawn, game speed %.0f%%, game %.1f ms/frame (logic + drawing), frame %.1f ms, worst %.0f ms",
+                              1000.0 * perf_frames / perf_frame_ms, 100.0 * perf_updates * kTargetFrameMs / perf_frame_ms,
+                              perf_step_ms / perf_frames, perf_frame_ms / perf_frames, perf_worst_ms);
+                Logger::info(line);
+                perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
+                perf_frames = perf_updates = 0;
+            }
+        } else {
+            perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
+            perf_frames = perf_updates = 0;
+            mv_owed_ms = 0.0;
+            mv_last_pc = 0;
+            step_avg_ms = 0.0;
+            if (has_vsync && !vsync_on && set_render_vsync(renderer.get(), true)) vsync_on = true;
+        }
+
         // VSync already paces the frame. Without it, sleep instead of spinning: a busy-wait
         // keeps a core at 100% on the handheld, steals time from the JS thread and heats the SoC.
-        if (smoke_frames == 0 && !has_vsync) {
-            constexpr double kTargetFrameMs = 1000.0 / 60.0;
+        if (smoke_frames == 0 && !vsync_on) {
             const double elapsed_ms = (static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0) / perf_freq;
             if (elapsed_ms + 1.0 < kTargetFrameMs) SDL_Delay(static_cast<Uint32>(kTargetFrameMs - elapsed_ms));
         }

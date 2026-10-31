@@ -6,12 +6,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -174,6 +180,64 @@ inline std::shared_ptr<DecodedImage> decode_project_image(const fs::path& projec
     stbi_image_free(rgba);
     return img;
 }
+
+// Decodes project images on worker threads so a scene that loads many pictures does not freeze the frame.
+// Results come back through futures that the JS thread polls once per frame.
+class ImageDecodePool {
+public:
+    using Result = std::shared_ptr<DecodedImage>;
+
+    ImageDecodePool() {
+        const unsigned cores = std::thread::hardware_concurrency();
+        const unsigned n = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, 3u);
+        for (unsigned i = 0; i < n; ++i) workers_.emplace_back([this] { run(); });
+    }
+    ~ImageDecodePool() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        for (auto& t : workers_) t.join();
+    }
+    ImageDecodePool(const ImageDecodePool&) = delete;
+    ImageDecodePool& operator=(const ImageDecodePool&) = delete;
+
+    std::shared_future<Result> submit(fs::path root, std::string url, std::vector<std::uint8_t> key) {
+        auto task = std::make_shared<std::packaged_task<Result()>>(
+            [root = std::move(root), url = std::move(url), key = std::move(key)] {
+                return decode_project_image(root, url, key);
+            });
+        std::shared_future<Result> fut = task->get_future().share();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push_back([task] { (*task)(); });
+        }
+        cv_.notify_one();
+        return fut;
+    }
+
+private:
+    void run() {
+        for (;;) {
+            std::function<void()> job;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+                if (stop_ && queue_.empty()) return;
+                job = std::move(queue_.front());
+                queue_.pop_front();
+            }
+            job();
+        }
+    }
+
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::deque<std::function<void()>> queue_;
+    std::vector<std::thread> workers_;
+    bool stop_ = false;
+};
 
 inline std::uint32_t pack_px(std::uint32_t r, std::uint32_t g, std::uint32_t b, std::uint32_t a) {
     return (r & 0xFFu) | ((g & 0xFFu) << 8) | ((b & 0xFFu) << 16) | ((a & 0xFFu) << 24);

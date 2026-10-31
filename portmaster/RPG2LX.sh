@@ -36,7 +36,7 @@ REQUEST="$CONFDIR/launch.request"
 mkdir -p "$CONFDIR" "$GAMEDIR/games" "$GAMEDIR/saves" "$GAMEDIR/logs" || exit 1
 cd "$GAMEDIR" || exit 1
 
-trap pm_finish EXIT
+trap 'restore_governor; pm_finish' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -63,6 +63,26 @@ fi
 chmod +x "$BIN"
 pm_platform_helper "$GAMEDIR/rpg2lx.${DEVICE_ARCH}"
 
+# The game's scripts run on one core in an interpreter; a CPU that an on-demand governor keeps clocked down makes
+# the game itself run slow. While a game runs the governor is "performance"; afterwards it goes back to what it was.
+GOVERNORS=()
+set_performance_governor() {
+    local files gov
+    files=$(ls /sys/devices/system/cpu/cpufreq/policy*/scaling_governor 2>/dev/null)
+    [ -n "$files" ] || files=$(ls /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor 2>/dev/null)
+    for gov in $files; do
+        GOVERNORS+=("$gov=$(cat "$gov" 2>/dev/null)")
+        echo performance | $ESUDO tee "$gov" >/dev/null 2>&1
+    done
+}
+restore_governor() {
+    local entry
+    for entry in "${GOVERNORS[@]}"; do
+        [ -n "${entry#*=}" ] && echo "${entry#*=}" | $ESUDO tee "${entry%%=*}" >/dev/null 2>&1
+    done
+    GOVERNORS=()
+}
+
 # Reads one "key=value" line from the launch request.
 request_value() {
     sed -n "s/^$1=//p" "$REQUEST" | head -n 1
@@ -80,8 +100,11 @@ while true; do
     project="$(request_value project)"
     game_id="$(request_value id)"
     echo "--- Launch: $game_id $(date) ---"
+    set_performance_governor
     "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"
-    echo "--- Game ended: $game_id status $? ---"
+    GAME_STATUS=$?
+    restore_governor
+    echo "--- Game ended: $game_id status $GAME_STATUS ---"
 done
 
 echo "=== RPG2LX session ended: $(date) ==="

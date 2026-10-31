@@ -35,13 +35,17 @@ public:
     void set_button(const std::string& mv_key_name, bool pressed);
     // Emulated keyboard: dispatched as DOM keydown/keyup, so Input.keyMapper and plugins see it.
     void set_key(int dom_key_code, bool pressed);
+    // Images are decoded on worker threads and their onload fires on a later frame. Tests and smoke runs step
+    // frames faster than real time; with this on, each frame waits for the decodes it asked for.
+    void set_blocking_image_decode(bool blocking);
     void clear_inputs();
     void on_pointer_move(int game_x, int game_y);
     void on_pointer_down(int game_x, int game_y, bool right_button = false);
     void on_pointer_up(int game_x, int game_y);
 
-    // Executes one 60 FPS MV frame (async callbacks + SceneManager.updateMain + GPU render)
-    bool step_and_render(std::string& error);
+    // Executes one MV frame: async callbacks, `updates` 60 FPS logic updates (more than one catches up on a slow
+    // device, like SceneManager.updateMain does), then one render.
+    bool step_and_render(std::string& error, int updates = 1);
 
     int screen_width() const;
     int screen_height() const;

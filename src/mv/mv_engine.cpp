@@ -136,6 +136,12 @@ struct MvEngine::Impl {
     FontRenderer font;
     MvAudioEngine audio;
     std::unordered_map<std::string, std::shared_ptr<DecodedImage>> image_cache;
+    // Images being decoded off-thread: ticket -> (cache key, result). One decode per key.
+    std::unordered_map<int, std::pair<std::string, std::shared_future<ImageDecodePool::Result>>> decoding;
+    std::unordered_map<std::string, std::shared_future<ImageDecodePool::Result>> decoding_by_key;
+    int next_decode_ticket = 1;
+    bool blocking_image_decode = false;
+    std::unique_ptr<ImageDecodePool> decode_pool;
 
 #ifdef RPG2LX_WITH_SDL
     MvSceneRenderer scene_renderer;
@@ -276,6 +282,9 @@ struct MvEngine::Impl {
             rt = nullptr;
         }
 
+        decode_pool.reset();
+        decoding.clear();
+        decoding_by_key.clear();
         image_cache.clear();
 #ifdef RPG2LX_WITH_SDL
         scene_renderer.release();
@@ -289,6 +298,12 @@ namespace {
 
 MvEngine::Impl* get_impl(JSContext* ctx) {
     return static_cast<MvEngine::Impl*>(JS_GetContextOpaque(ctx));
+}
+
+// Wall clock without the simulated-frame floor; for profiling tools.
+JSValue cb_hr_now_ms(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    return JS_NewFloat64(ctx, std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
 JSValue cb_now_ms(JSContext* ctx, JSValueConst, int, JSValueConst*) {
@@ -482,6 +497,18 @@ JSValue cb_bmp_create(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv
     return im->wrap_bitmap(new NativeBitmap(w, h));
 }
 
+void cache_decoded_image(MvEngine::Impl* im, const std::string& key, const std::shared_ptr<DecodedImage>& decoded) {
+    if (!decoded) return;
+    if (im->image_cache.size() > 384) {
+        // Prune images only held by the cache itself
+        for (auto cit = im->image_cache.begin(); cit != im->image_cache.end(); ) {
+            if (cit->second.use_count() == 1) cit = im->image_cache.erase(cit);
+            else ++cit;
+        }
+    }
+    im->image_cache.emplace(key, decoded);
+}
+
 JSValue cb_bmp_load_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* im = get_impl(ctx);
     if (!im || argc < 1) return JS_NULL;
@@ -495,17 +522,46 @@ JSValue cb_bmp_load_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* a
         decoded = it->second;
     } else {
         decoded = decode_project_image(im->project_root, raw_url, im->encryption_key_bytes);
-        if (decoded) {
-            if (im->image_cache.size() > 384) {
-                // Prune images only held by the cache itself
-                for (auto cit = im->image_cache.begin(); cit != im->image_cache.end(); ) {
-                    if (cit->second.use_count() == 1) cit = im->image_cache.erase(cit);
-                    else ++cit;
-                }
-            }
-            im->image_cache.emplace(key, decoded);
-        }
+        cache_decoded_image(im, key, decoded);
     }
+    if (!decoded) return JS_NULL;
+    return im->wrap_bitmap(new NativeBitmap(decoded));
+}
+
+// bmpLoadFileAsync(url): a bitmap ref when the image is already decoded, otherwise a ticket for bmpLoadPoll.
+JSValue cb_bmp_load_file_async(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* im = get_impl(ctx);
+    if (!im || argc < 1) return JS_NULL;
+    const std::string raw_url = js_to_std_string(ctx, argv[0]);
+    const std::string key = url_decode_rel(raw_url);
+    if (key.empty()) return JS_NULL;
+    auto it = im->image_cache.find(key);
+    if (it != im->image_cache.end()) return im->wrap_bitmap(new NativeBitmap(it->second));
+    if (!im->decode_pool) im->decode_pool = std::make_unique<ImageDecodePool>();
+    auto pending = im->decoding_by_key.find(key);
+    if (pending == im->decoding_by_key.end()) {
+        pending = im->decoding_by_key.emplace(
+            key, im->decode_pool->submit(im->project_root, raw_url, im->encryption_key_bytes)).first;
+    }
+    const int ticket = im->next_decode_ticket++;
+    im->decoding.emplace(ticket, std::make_pair(key, pending->second));
+    return JS_NewInt32(ctx, ticket);
+}
+
+// bmpLoadPoll(ticket): undefined while decoding, then a bitmap ref, or null when the image cannot be loaded.
+JSValue cb_bmp_load_poll(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* im = get_impl(ctx);
+    int32_t ticket = 0;
+    if (!im || argc < 1 || JS_ToInt32(ctx, &ticket, argv[0])) return JS_NULL;
+    auto it = im->decoding.find(ticket);
+    if (it == im->decoding.end()) return JS_NULL;
+    if (!im->blocking_image_decode &&
+        it->second.second.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return JS_UNDEFINED;
+    const std::string key = it->second.first;
+    const auto decoded = it->second.second.get();
+    im->decoding.erase(it);
+    im->decoding_by_key.erase(key);
+    if (!im->image_cache.count(key)) cache_decoded_image(im, key, decoded);
     if (!decoded) return JS_NULL;
     return im->wrap_bitmap(new NativeBitmap(decoded));
 }
@@ -1171,6 +1227,7 @@ struct BridgeFunc {
 
 const BridgeFunc kRpg2lxFuncs[] = {
     {"nowMs", 0, cb_now_ms},
+    {"hrNowMs", 0, cb_hr_now_ms},
     {"log", 2, cb_log},
     {"reportError", 1, cb_report_error},
     {"requestExit", 0, cb_request_exit},
@@ -1210,6 +1267,8 @@ const BridgeFunc kRpg2lxFuncs[] = {
     {"bmpAdjustTone", 4, cb_bmp_adjust_tone},
     {"bmpRotateHue", 2, cb_bmp_rotate_hue},
     {"bmpBlur", 1, cb_bmp_blur},
+    {"bmpLoadFileAsync", 1, cb_bmp_load_file_async},
+    {"bmpLoadPoll", 1, cb_bmp_load_poll},
     {"renderStage", 3, cb_render_stage},
     {"renderStageToBitmap", 4, cb_render_stage_to_bmp},
     {"audioCreate", 1, cb_audio_create},
@@ -1460,6 +1519,8 @@ void MvEngine::set_key(int key_code, bool pressed) {
     JS_FreeValue(impl_->ctx, r);
 }
 
+void MvEngine::set_blocking_image_decode(bool blocking) { impl_->blocking_image_decode = blocking; }
+
 void MvEngine::clear_inputs() {
     if (!impl_->ctx || !JS_IsFunction(impl_->ctx, impl_->fn_clear_input)) return;
     JSValue r = JS_Call(impl_->ctx, impl_->fn_clear_input, JS_UNDEFINED, 0, nullptr);
@@ -1491,7 +1552,8 @@ void MvEngine::on_pointer_up(int game_x, int game_y) {
     JS_FreeValue(impl_->ctx, r);
 }
 
-bool MvEngine::step_and_render(std::string& error) {
+bool MvEngine::step_and_render(std::string& error, int updates) {
+    updates = std::max(1, updates);
     error.clear();
     if (!impl_->ctx) {
         error = "MvEngine not initialized";
@@ -1508,7 +1570,8 @@ bool MvEngine::step_and_render(std::string& error) {
     }
 
     if (error.empty() && JS_IsFunction(impl_->ctx, impl_->fn_step)) {
-        JSValue r2 = JS_Call(impl_->ctx, impl_->fn_step, JS_UNDEFINED, 0, nullptr);
+        JSValue arg = JS_NewInt32(impl_->ctx, updates);
+        JSValue r2 = JS_Call(impl_->ctx, impl_->fn_step, JS_UNDEFINED, 1, &arg);
         if (JS_IsException(r2)) {
             error = format_js_exception(impl_->ctx);
         }
@@ -1516,7 +1579,7 @@ bool MvEngine::step_and_render(std::string& error) {
         impl_->drain_jobs();
     }
 
-    ++impl_->frames;
+    impl_->frames += static_cast<std::uint64_t>(updates);
 
     if (!impl_->fatal_error.empty()) {
         error = impl_->fatal_error;

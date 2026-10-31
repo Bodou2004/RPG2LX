@@ -52,7 +52,18 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
         }
     };
 
+    var __pendingImages = [];
     global.__drainFrameCallbacks = function() {
+        if (__pendingImages.length > 0) {
+            var still = [];
+            for (var pi = 0; pi < __pendingImages.length; pi++) {
+                var job = __pendingImages[pi];
+                var res = __rpg2lx.bmpLoadPoll(job.ticket);
+                if (res === undefined) still.push(job);
+                else __queueAsync((function(settle, ref) { return function() { settle(ref); }; })(job.settle, res));
+            }
+            __pendingImages = still;
+        }
         // Drain queued async I/O & image/XHR/audio callbacks (including chained ones)
         var guard = 0;
         while (__asyncQueue.length > 0 && guard++ < 512) {
@@ -450,9 +461,10 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
             }
             var self = this;
             var targetUrl = this._src;
-            __queueAsync(function() {
+            // Decoded on a worker thread; __drainFrameCallbacks fires onload once it is ready.
+            var started = __rpg2lx.bmpLoadFileAsync(targetUrl);
+            var settle = function(ref) {
                 if (self._src !== targetUrl) return;
-                var ref = __rpg2lx.bmpLoadFile(targetUrl);
                 if (ref) {
                     self._nbmpRef = ref;
                     self.width = __rpg2lx.bmpWidth(ref);
@@ -467,7 +479,9 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
                     var es = self._listeners.error.slice();
                     for (var j = 0; j < es.length; j++) es[j].call(self);
                 }
-            });
+            };
+            if (typeof started === 'number') __pendingImages.push({ ticket: started, settle: settle });
+            else __queueAsync(function() { settle(started); });
         }
     });
     global.Image = Image;
@@ -1537,16 +1551,20 @@ inline constexpr const char* kMvPostManagersPatchJs = R"JS(
     SceneManager.initNwjs = function() {};
     SceneManager.terminate = function() { __rpg2lx.requestExit(); };
 
-    // Deterministic 1:1 60 FPS frame driver (zero accumulator micro-stutter!)
+    // Frame driver: the host decides how many 60 FPS updates this frame needs (1 normally, more to catch up when
+    // the device is slow) and the scene is rendered once, the same loop as SceneManager.updateMain.
     SceneManager.requestUpdate = function() {};
-    global.__rpg2lxStepScene = function() {
+    global.__rpg2lxStepScene = function(updates) {
         try {
             if (SceneManager._stopped) return;
+            updates = updates > 1 ? updates : 1;
             SceneManager.tickStart();
             SceneManager.updateManagers();
-            SceneManager.updateInputData();
-            SceneManager.changeScene();
-            SceneManager.updateScene();
+            for (var i = 0; i < updates && !SceneManager._stopped; i++) {
+                SceneManager.updateInputData();
+                SceneManager.changeScene();
+                SceneManager.updateScene();
+            }
             SceneManager.renderScene();
             SceneManager.tickEnd();
         } catch (e) {

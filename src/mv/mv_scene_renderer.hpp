@@ -196,21 +196,22 @@ public:
     }
 
     void release() {
-        destroy_rt(tile_lower_rt_);
-        destroy_rt(tile_upper_rt_);
+        for (TileLayerCache* c : {&tile_lower_, &tile_upper_}) {
+            destroy_rt(c->rt[0]);
+            destroy_rt(c->rt[1]);
+            *c = {};
+        }
         destroy_rt(snap_rt_);
         destroy_rt(win_layer_rt_);
         cached_map_data_.clear();
         cached_flags_.clear();
         cached_map_rev_ = -1;
-        tile_lower_key_ = {};
-        tile_upper_key_ = {};
         renderer_ = nullptr;
     }
 
     void invalidate_tile_cache() {
-        tile_lower_key_ = {};
-        tile_upper_key_ = {};
+        tile_lower_.key = {};
+        tile_upper_.key = {};
     }
 
     void render_stage(JSContext* ctx, JSValueConst stage, int width, int height) {
@@ -250,17 +251,27 @@ public:
 private:
     struct TileCacheKey {
         bool valid = false;
-        bool non_empty = true;
         int start_tx = 0;
         int start_ty = 0;
         int anim_mod = -1;
         int map_rev = -1;
         int cols = 0;
         int rows = 0;
-        bool matches(const TileCacheKey& o) const {
-            return valid && o.valid && start_tx == o.start_tx && start_ty == o.start_ty &&
-                   anim_mod == o.anim_mod && map_rev == o.map_rev && cols == o.cols && rows == o.rows;
+        bool same_layout(const TileCacheKey& o) const {
+            return valid && o.valid && map_rev == o.map_rev && cols == o.cols && rows == o.rows;
         }
+    };
+
+    // One tilemap pass painted into a texture that covers the screen plus a tile of margin. Scrolling moves the
+    // old picture into the second texture and paints only the new rows and columns; an animation step repaints
+    // only the cells that hold animated water. A full repaint happens only on a new map or a new layout.
+    struct TileLayerCache {
+        SDL_Texture* rt[2] = {nullptr, nullptr};
+        int cur = 0;
+        int w = 0, h = 0;
+        TileCacheKey key{};
+        bool non_empty = false;
+        std::vector<int> anim_cells; // grid index (gy * cols + gx) of cells with an animated tile
     };
 
     SDL_Renderer* renderer_ = nullptr;
@@ -268,13 +279,11 @@ private:
     const MvAtoms* atoms_ = nullptr;
     bool supports_rt_ = false;
 
-    SDL_Texture* tile_lower_rt_ = nullptr;
-    int tile_lower_w_ = 0, tile_lower_h_ = 0;
-    TileCacheKey tile_lower_key_{};
-
-    SDL_Texture* tile_upper_rt_ = nullptr;
-    int tile_upper_w_ = 0, tile_upper_h_ = 0;
-    TileCacheKey tile_upper_key_{};
+    TileLayerCache tile_lower_{};
+    TileLayerCache tile_upper_{};
+    // Patches of tiles that do not animate, computed once per tile id (index: tid * 2 + table).
+    std::vector<std::vector<TilePatch>> static_patches_;
+    std::vector<bool> static_patches_ready_;
 
     SDL_Texture* snap_rt_ = nullptr;
     int snap_w_ = 0, snap_h_ = 0;
@@ -405,14 +414,43 @@ private:
         return tid >= 4352 && tid < 8192;
     }
 
+    // A1 water and waterfall autotiles change with the animation frame; A1 kinds 2 and 3 do not.
+    static bool is_animated_tile(int tid) {
+        if (tid < 2048 || tid >= 2816) return false;
+        const int kind = (tid - 2048) / 48;
+        return kind != 2 && kind != 3;
+    }
+
+    const std::vector<TilePatch>& patches_for(int tid, unsigned anim_frame, bool table, std::vector<TilePatch>& scratch) {
+        static const std::vector<TilePatch> kNone;
+        if (is_animated_tile(tid)) {
+            try {
+                scratch = tile_patches(tid, anim_frame, table);
+            } catch (...) {
+                scratch.clear();
+            }
+            return scratch;
+        }
+        const std::size_t idx = static_cast<std::size_t>(tid) * 2 + (table ? 1 : 0);
+        if (static_patches_.size() <= idx) {
+            static_patches_.resize(8192 * 2);
+            static_patches_ready_.assign(8192 * 2, false);
+        }
+        if (!static_patches_ready_[idx]) {
+            try {
+                static_patches_[idx] = tile_patches(tid, 0, table);
+            } catch (...) {
+                static_patches_[idx].clear();
+            }
+            static_patches_ready_[idx] = true;
+        }
+        return idx < static_patches_.size() ? static_patches_[idx] : kNone;
+    }
+
     void draw_single_tile(SDL_Texture* const sheets[9], int tid, unsigned anim_frame, int dx, int dy) {
         if (tid <= 0 || tid >= 8192) return;
-        std::vector<TilePatch> patches;
-        try {
-            patches = tile_patches(tid, anim_frame, is_table_tile(tid));
-        } catch (...) {
-            return;
-        }
+        std::vector<TilePatch> scratch;
+        const auto& patches = patches_for(tid, anim_frame, is_table_tile(tid), scratch);
         for (const auto& p : patches) {
             if (p.image < 0 || p.image >= 9 || !sheets[p.image]) continue;
             SDL_Rect src{p.sx, p.sy, p.w, p.h};
@@ -423,12 +461,8 @@ private:
 
     void draw_table_edge(SDL_Texture* const sheets[9], int upper_tid, unsigned anim_frame, int dx, int dy) {
         if (upper_tid < 2816 || upper_tid >= 4352 || !sheets[1]) return;
-        std::vector<TilePatch> patches;
-        try {
-            patches = tile_patches(upper_tid, anim_frame, false);
-        } catch (...) {
-            return;
-        }
+        std::vector<TilePatch> scratch;
+        const auto& patches = patches_for(upper_tid, anim_frame, false, scratch);
         if (patches.size() < 4) return;
         for (int i = 0; i < 2; ++i) {
             const auto& p = patches[static_cast<std::size_t>(2 + i)];
@@ -438,17 +472,39 @@ private:
         }
     }
 
+    // Paints cells [gx0, gx1) x [gy0, gy1) of the grid that starts at map cell (start_tx, start_ty).
     bool paint_tile_grid(SDL_Texture* const sheets[9], int pass, int start_tx, int start_ty,
                          int cols, int rows, int tw, int th, unsigned anim_frame,
                          bool hwrap, bool vwrap, int base_x, int base_y) {
-        bool drew_any = false;
-        for (int gy = 0; gy < rows; ++gy) {
-            const int my = start_ty + gy;
-            const int dy = base_y + gy * th;
-            for (int gx = 0; gx < cols; ++gx) {
-                const int mx = start_tx + gx;
-                const int dx = base_x + gx * tw;
+        return paint_tile_rect(sheets, pass, start_tx, start_ty, 0, cols, 0, rows, tw, th, anim_frame,
+                               hwrap, vwrap, base_x, base_y);
+    }
 
+    bool paint_tile_rect(SDL_Texture* const sheets[9], int pass, int start_tx, int start_ty,
+                         int gx0, int gx1, int gy0, int gy1, int tw, int th, unsigned anim_frame,
+                         bool hwrap, bool vwrap, int base_x, int base_y) {
+        bool drew_any = false;
+        for (int gy = gy0; gy < gy1; ++gy) {
+            for (int gx = gx0; gx < gx1; ++gx) {
+                drew_any |= paint_cell(sheets, pass, start_tx + gx, start_ty + gy, base_x + gx * tw, base_y + gy * th,
+                                       tw, th, anim_frame, hwrap, vwrap);
+            }
+        }
+        return drew_any;
+    }
+
+    bool cell_animates(int mx, int my, bool hwrap, bool vwrap) const {
+        for (int z = 0; z < 4; ++z) {
+            if (is_animated_tile(read_tile(mx, my, z, hwrap, vwrap))) return true;
+        }
+        return false;
+    }
+
+    bool paint_cell(SDL_Texture* const sheets[9], int pass, int mx, int my, int dx, int dy, int tw, int th,
+                    unsigned anim_frame, bool hwrap, bool vwrap) {
+        bool drew_any = false;
+        {
+            {
                 const int t0 = read_tile(mx, my, 0, hwrap, vwrap);
                 const int t1 = read_tile(mx, my, 1, hwrap, vwrap);
                 const int t2 = read_tile(mx, my, 2, hwrap, vwrap);
@@ -490,6 +546,108 @@ private:
             }
         }
         return drew_any;
+    }
+
+    void collect_anim_cells(TileLayerCache& c, int start_tx, int start_ty, int cols, int rows, bool hwrap, bool vwrap) {
+        c.anim_cells.clear();
+        for (int gy = 0; gy < rows; ++gy) {
+            for (int gx = 0; gx < cols; ++gx) {
+                if (cell_animates(start_tx + gx, start_ty + gy, hwrap, vwrap)) c.anim_cells.push_back(gy * cols + gx);
+            }
+        }
+    }
+
+    // Makes the cache show the grid in `want`, painting as little as it can. Returns false when render targets fail.
+    bool update_tile_cache(TileLayerCache& c, const TileCacheKey& want, SDL_Texture* const sheets[9], int pass,
+                           int tw, int th, unsigned anim_frame, bool hwrap, bool vwrap) {
+        const int rt_w = want.cols * tw, rt_h = want.rows * th;
+        if (c.w != rt_w || c.h != rt_h) {
+            destroy_rt(c.rt[0]);
+            destroy_rt(c.rt[1]);
+            int w0 = 0, h0 = 0, w1 = 0, h1 = 0;
+            ensure_rt(c.rt[0], w0, h0, rt_w, rt_h);
+            ensure_rt(c.rt[1], w1, h1, rt_w, rt_h);
+            if (!c.rt[0] || !c.rt[1]) {
+                destroy_rt(c.rt[0]);
+                destroy_rt(c.rt[1]);
+                c.w = c.h = 0;
+                return false;
+            }
+            c.w = rt_w;
+            c.h = rt_h;
+            c.cur = 0;
+            c.key = {};
+        }
+        const int dx = want.start_tx - c.key.start_tx;
+        const int dy = want.start_ty - c.key.start_ty;
+        const bool layout_kept = c.key.same_layout(want);
+        const bool scrolled = layout_kept && (dx != 0 || dy != 0);
+        const bool full = !layout_kept || std::abs(dx) >= want.cols || std::abs(dy) >= want.rows;
+        const bool anim_changed = c.key.anim_mod != want.anim_mod;
+        if (!full && !scrolled && (!anim_changed || c.anim_cells.empty())) {
+            c.key = want;
+            return true;
+        }
+
+        SDL_Texture* prev_rt = SDL_GetRenderTarget(renderer_);
+        auto clear_rect = [&](int x, int y, int w, int h) {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+            SDL_Rect r{x, y, w, h};
+            SDL_RenderFillRect(renderer_, &r);
+        };
+
+        if (full) {
+            if (SDL_SetRenderTarget(renderer_, c.rt[c.cur]) != 0) return false;
+            SDL_RenderSetClipRect(renderer_, nullptr);
+            clear_rect(0, 0, rt_w, rt_h);
+            c.non_empty = paint_tile_grid(sheets, pass, want.start_tx, want.start_ty, want.cols, want.rows, tw, th,
+                                          anim_frame, hwrap, vwrap, 0, 0);
+            collect_anim_cells(c, want.start_tx, want.start_ty, want.cols, want.rows, hwrap, vwrap);
+        } else {
+            if (scrolled) {
+                // The picture so far, moved by the scroll, then the cells that came into view.
+                SDL_Texture* src = c.rt[c.cur];
+                SDL_Texture* dst = c.rt[1 - c.cur];
+                if (SDL_SetRenderTarget(renderer_, dst) != 0) return false;
+                SDL_RenderSetClipRect(renderer_, nullptr);
+                clear_rect(0, 0, rt_w, rt_h);
+                SDL_SetTextureBlendMode(src, SDL_BLENDMODE_NONE);
+                SDL_SetTextureAlphaMod(src, 255);
+                SDL_Rect to{-dx * tw, -dy * th, rt_w, rt_h};
+                SDL_RenderCopy(renderer_, src, nullptr, &to);
+                SDL_SetTextureBlendMode(src, SDL_BLENDMODE_BLEND);
+                c.cur = 1 - c.cur;
+                const int keep_x0 = std::max(0, -dx), keep_x1 = std::min(want.cols, want.cols - dx);
+                const int keep_y0 = std::max(0, -dy), keep_y1 = std::min(want.rows, want.rows - dy);
+                bool drew = false;
+                // Rows above and below the kept band (full width), then columns beside it (kept rows only).
+                drew |= paint_tile_rect(sheets, pass, want.start_tx, want.start_ty, 0, want.cols, 0, keep_y0,
+                                        tw, th, anim_frame, hwrap, vwrap, 0, 0);
+                drew |= paint_tile_rect(sheets, pass, want.start_tx, want.start_ty, 0, want.cols, keep_y1, want.rows,
+                                        tw, th, anim_frame, hwrap, vwrap, 0, 0);
+                drew |= paint_tile_rect(sheets, pass, want.start_tx, want.start_ty, 0, keep_x0, keep_y0, keep_y1,
+                                        tw, th, anim_frame, hwrap, vwrap, 0, 0);
+                drew |= paint_tile_rect(sheets, pass, want.start_tx, want.start_ty, keep_x1, want.cols, keep_y0, keep_y1,
+                                        tw, th, anim_frame, hwrap, vwrap, 0, 0);
+                c.non_empty = c.non_empty || drew;
+                collect_anim_cells(c, want.start_tx, want.start_ty, want.cols, want.rows, hwrap, vwrap);
+            } else if (SDL_SetRenderTarget(renderer_, c.rt[c.cur]) != 0) {
+                return false;
+            }
+            if (anim_changed) {
+                SDL_RenderSetClipRect(renderer_, nullptr);
+                for (const int cell : c.anim_cells) {
+                    const int gx = cell % want.cols, gy = cell / want.cols;
+                    clear_rect(gx * tw, gy * th, tw, th);
+                    paint_cell(sheets, pass, want.start_tx + gx, want.start_ty + gy, gx * tw, gy * th, tw, th,
+                               anim_frame, hwrap, vwrap);
+                }
+            }
+        }
+        SDL_SetRenderTarget(renderer_, prev_rt);
+        c.key = want;
+        return true;
     }
 
     void render_tilemap_pass(JSContext* ctx, JSValueConst layer_obj, int pass,
@@ -553,30 +711,13 @@ private:
         const int rt_w = cols * tw;
         const int rt_h = rows * th;
 
-        SDL_Texture*& cache_rt = (pass == 1) ? tile_lower_rt_ : tile_upper_rt_;
-        int& cache_w = (pass == 1) ? tile_lower_w_ : tile_upper_w_;
-        int& cache_h = (pass == 1) ? tile_lower_h_ : tile_upper_h_;
-        TileCacheKey& cache_key = (pass == 1) ? tile_lower_key_ : tile_upper_key_;
-
-        ensure_rt(cache_rt, cache_w, cache_h, rt_w, rt_h);
-
-        TileCacheKey want_key{true, true, start_tx, start_ty, anim_frame % 12, rev, cols, rows};
-        if (cache_rt) {
-            if (!cache_key.matches(want_key)) {
-                SDL_Texture* prev_rt = SDL_GetRenderTarget(renderer_);
-                if (SDL_SetRenderTarget(renderer_, cache_rt) == 0) {
-                    SDL_RenderSetClipRect(renderer_, nullptr);
-                    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
-                    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
-                    SDL_RenderClear(renderer_);
-                    want_key.non_empty = paint_tile_grid(sheets, pass, start_tx, start_ty, cols, rows, tw, th,
-                                                         static_cast<unsigned>(anim_frame), hwrap, vwrap, 0, 0);
-                    SDL_SetRenderTarget(renderer_, prev_rt);
-                    cache_key = want_key;
-                }
-            }
-            if (cache_key.valid) {
-                if (!cache_key.non_empty) return;
+        TileLayerCache& cache = (pass == 1) ? tile_lower_ : tile_upper_;
+        const TileCacheKey want_key{true, start_tx, start_ty, anim_frame % 12, rev, cols, rows};
+        if (supports_rt_ && update_tile_cache(cache, want_key, sheets, pass, tw, th,
+                                              static_cast<unsigned>(anim_frame), hwrap, vwrap)) {
+            SDL_Texture* cache_rt = cache.rt[cache.cur];
+            {
+                if (!cache.non_empty) return;
                 const auto a_u8 = static_cast<Uint8>(std::clamp(std::round(tr.alpha * 255.0), 0.0, 255.0));
                 SDL_SetTextureAlphaMod(cache_rt, a_u8);
                 SDL_Rect dst{

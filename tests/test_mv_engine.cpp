@@ -115,6 +115,7 @@ void test_real_mv_project(SDL_Renderer* renderer, const fs::path& mv_root) {
     require(rpg2lx::MvEngine::is_supported_project(mv_root), "Real MV project must be supported by MvEngine");
 
     rpg2lx::MvEngine engine;
+    engine.set_blocking_image_decode(true);
     std::string err;
     require(engine.boot(mv_root, temp_save, renderer, 640, 480, err), "MvEngine boot failed: " + err);
 

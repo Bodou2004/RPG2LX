@@ -9,7 +9,7 @@ import zipfile
 from verify_arm64 import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-README = '''RPG2LX 0.7.0 - HUB de RPG Maker MV para PortMaster (Linux ARM64)
+README = '''RPG2LX 0.7.2 - HUB de RPG Maker MV para PortMaster (Linux ARM64)
 
 INSTALAR
 1. Extrae RPG2LX.sh y la carpeta rpg2lx dentro de la carpeta ports de la SD.
@@ -88,7 +88,7 @@ def main():
             parser.error('Invalid game folder name')
         shutil.copytree(game, runtime / 'games' / game.name)
     (runtime / 'build-info.json').write_text(json.dumps({
-        'runtime_version': '0.7.0',
+        'runtime_version': '0.7.2',
         'platform': 'PortMaster Linux aarch64',
         'firmware_specific_code': False,
         'in_game_runtime_hud': False,

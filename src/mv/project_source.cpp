@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <mutex>
 #include <regex>
 #include <unordered_map>
 #include <vector>
@@ -17,8 +18,11 @@ std::string fold(std::string text) {
 }
 
 // Lower-cased name -> real name for each directory already listed (games never change while running).
+// Image decoding threads look files up too; entries are never erased, so a returned reference stays valid.
+std::mutex listing_mutex;
 const std::unordered_map<std::string,std::string>& listing(const fs::path& dir) {
     static std::unordered_map<std::string,std::unordered_map<std::string,std::string>> cache;
+    std::lock_guard<std::mutex> lock(listing_mutex);
     auto [it,inserted]=cache.try_emplace(dir.u8string());
     if(inserted) {
         std::error_code ec;
