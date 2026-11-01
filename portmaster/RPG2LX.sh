@@ -134,11 +134,17 @@ run_browser() {
     $GPTOKEYB "nw" -c "$gptk" &
     command -v portmaster_sway_fullscreen.sh >/dev/null 2>&1 && portmaster_sway_fullscreen.sh nw >/dev/null 2>&1 &
 
+    # Chromium's profile goes to tmpfs: the SD's FAT/exFAT cannot hold its SingletonLock symlink. Saves do not
+    # live there (they go to saves/<id>/), so losing it on reboot costs nothing.
+    local profile="/tmp/rpg2lx-nw/$(printf '%s' "$game_id" | tr -c 'A-Za-z0-9._-' '_')"
+    mkdir -p "$profile"
+    rm -f "$profile/SingletonLock" "$profile/SingletonSocket" "$profile/SingletonCookie"
+
     local started=$SECONDS
     # nwjs/syslibs carries the NSS libraries the firmware lacks; everything else comes from the system.
     RPG2LX_BROWSER_LOG="$blog" RPG2LX_SAVE_DIR="$GAMEDIR/saves/$game_id" \
     LD_LIBRARY_PATH="$nwdir/lib:$nwdir/syslibs:$LD_LIBRARY_PATH" \
-        "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox "$app" >> "$blog" 2>&1
+        "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox "--user-data-dir=$profile" "$app" >> "$blog" 2>&1
     local status=$?
     pm_gptokeyb_finish 2>/dev/null || $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
     echo "=== NW.js exited with $status after $((SECONDS - started)) s" >> "$blog"

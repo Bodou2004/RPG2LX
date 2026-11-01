@@ -215,18 +215,18 @@ bool write_browser_app(const fs::path& home, const std::string& game_id, const f
         error = "Falta index.html en " + project.u8string();
         return false;
     }
-    const fs::path profile = game_config_dir(home, game_id) / "chromium";
-    fs::create_directories(profile, ec);
     fs::create_directories(home / "saves" / fs::u8path(game_id), ec);
 
     // Chromium switches for a 1 GB handheld: no background throttling (the game is the only window), files of
     // the game readable from its index.html (MV loads data/*.json with XHR), the Mali GPU used even though
-    // Chromium does not list it, and a small disk cache.
+    // Chromium does not list it, and a small disk cache. The profile folder (--user-data-dir) is passed by
+    // RPG2LX.sh: it must live off the SD, whose FAT/exFAT cannot hold Chromium's SingletonLock symlink, and a
+    // path inside chromium-args would be split at its spaces.
     const std::string args =
         "--allow-file-access-from-files --disable-background-timer-throttling --disable-renderer-backgrounding "
         "--disable-backgrounding-occluded-windows --ignore-gpu-blocklist --enable-gpu-rasterization "
         "--disable-features=Translate,MediaRouter,OptimizationHints --disk-cache-size=8388608 "
-        "--autoplay-policy=no-user-gesture-required --user-data-dir=" + profile.generic_u8string();
+        "--autoplay-policy=no-user-gesture-required";
     std::ostringstream pkg;
     pkg << "{\n"
         << "  \"name\": " << json_string("rpg2lx-" + game_id) << ",\n"
