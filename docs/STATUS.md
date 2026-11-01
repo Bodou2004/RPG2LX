@@ -52,6 +52,17 @@ Por defecto cada botón envía una acción de MV ([Aceptar], [Cancelar], [Menú]
 - Toda la suite de `tools/build_native.py --release`. Incluye la prueba completa contra la plantilla `NewData` de Steam (logo, título, mapa, mensaje, menú, guardado, batalla), el teclado vía `keyMapper` y una prueba de píxeles del Canvas 2D.
 - SAOR DOMINA (`Games/Project1/SAOR-DOMINA-PLUGIN-TEST`, 21 plugins activos) sin modificar: arranca, título MOG, nueva partida, mapa con su HUD y movimiento. Corrió 1037 frames sin errores, a una media de 7,7 ms por frame en PC (`tests/mv_probe.cpp`).
 
+## Pruebas automáticas (CI)
+
+GitHub Actions (`.github/workflows/ci.yml`) corre en cada push y pull request:
+
+- Linux x86_64 sin SDL: build CMake y `ctest` completo.
+- Linux x86_64 con SDL2 (apt, `SDL_VIDEODRIVER=dummy`): `MvEngineTests` y `GameViewTests`. La prueba con `NewData` de Steam se salta sola.
+- Windows x64 (MSVC) sin SDL: build CMake y `ctest`.
+- Compilación cruzada aarch64 con Zig 0.13.0 (`tools/build_arm64.py`): solo compila; el binario queda como artefacto. No se ejecuta.
+
+La CI no sustituye la prueba en consola ni la prueba de Domina.
+
 ## Qué no está comprobado
 
 - Rendimiento y controles en la consola.
