@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-core:
+    name: Linux x86_64 (core, no SDL)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Release -DRPG2LX_WITH_SDL=OFF
+      - name: Build
+        run: cmake --build build/ci --parallel
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure
+
+  linux-sdl:
+    name: Linux x86_64 (SDL2, headless)
+    runs-on: ubuntu-24.04
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Configure
+        run: cmake -S . -B build/ci -DCMAKE_BUILD_TYPE=Release -DRPG2LX_WITH_SDL=ON
+      - name: Build
+        run: cmake --build build/ci --parallel
+      - name: MV engine and game view tests
+        run: ctest --test-dir build/ci --output-on-failure -R "MvEngineTests|GameViewTests"
+
+  windows:
+    name: Windows x64 (MSVC, no SDL)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build/ci -DRPG2LX_WITH_SDL=OFF
+      - name: Build
+        run: cmake --build build/ci --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build/ci -C Release --output-on-failure
+
+  aarch64-cross:
+    name: Cross-compile aarch64 (Zig 0.13.0, build only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Zig 0.13.0
+        run: python -m pip install --target build/tooling ziglang==0.13.0
+      - name: Fetch link-only ARM64 SDL2 SDK
+        run: python tools/prepare_arm64_sdk.py
+      - name: Build
+        run: python tools/build_arm64.py --zig build/tooling/ziglang/zig --sdl-root build/cross-sdl/sysroot
+      - name: Check binary
+        run: file build/aarch64/rpg2lx.aarch64 | tee /dev/stderr | grep -q "ARM aarch64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpg2lx-aarch64
+          path: |
+            build/aarch64/rpg2lx.aarch64
+            build/aarch64/build-info.json
