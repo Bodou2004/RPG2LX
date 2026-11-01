@@ -116,6 +116,11 @@ int main(int argc, char** argv) {
             total_ms = worst_ms = 0;
             frames = slow = 0;
         }
+        // "profile N": the N heaviest JS functions since the last profile (the console log's "js profile" lines).
+        else if (cmd == "profile") {
+            std::cout << "[profile] drawing " << engine.take_draw_ms() << " ms\n";
+            for (const auto& l : engine.take_js_profile(static_cast<std::size_t>(std::stoi(rest)))) std::cout << l << '\n';
+        }
         else if (cmd == "until") {
             const auto space = rest.rfind(' ');
             const std::string expr = rest.substr(0, space);

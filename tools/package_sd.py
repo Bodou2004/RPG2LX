@@ -9,7 +9,7 @@ import zipfile
 from verify_arm64 import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-README = '''RPG2LX 0.8.0 - HUB de RPG Maker MV para PortMaster (Linux ARM64)
+README = '''RPG2LX 0.8.3 - HUB de RPG Maker MV para PortMaster (Linux ARM64)
 
 INSTALAR
 1. Extrae RPG2LX.sh y la carpeta rpg2lx dentro de la carpeta ports de la SD.
@@ -27,11 +27,14 @@ cambie su teclado. Se configuran en el HUB, globales o por juego.
 Select + Start: cerrar el juego y volver al HUB.
 
 MOTORES (en el menú de cada juego, opción Motor)
-- Nativo: ligero, propio de RPG2LX. Ejecuta los scripts originales del juego.
+- Auto (por defecto): el navegador si Chromium puede dibujar con la GPU de la consola; si no, el nativo.
+  La primera vez que se abre un juego en Auto o Navegador, RPG2LX prueba la GPU (pantalla negra
+  hasta un minuto). Lo repite solo si cambia el driver de la GPU, el kernel o NW.js.
 - Navegador: NW.js (Chromium), el mismo que usan los juegos de MV en PC. Compatibilidad
-  total con los plugins y JavaScript compilado; usa más memoria. Es el motor por defecto. Necesita un firmware
-  con Wayland o X11 (ROCKNIX lo tiene). Si no puede arrancar, el juego abre en el nativo.
-Las partidas son las mismas con los dos motores.
+  total con los plugins y JavaScript compilado; usa más memoria. Sin GPU dibuja con la CPU y va
+  muy lento. Necesita Wayland o X11 (ROCKNIX lo tiene). Si no arranca, el juego abre en el nativo.
+- Nativo: ligero, propio de RPG2LX. Ejecuta los scripts originales del juego.
+Las partidas son las mismas con los tres.
 
 Los juegos corren como exportados (sin modo de prueba). Las partidas se guardan en
 rpg2lx/saves/<juego>/ sin tocar los archivos del juego.
@@ -107,7 +110,7 @@ def main():
             parser.error('Invalid game folder name')
         shutil.copytree(game, runtime / 'games' / game.name)
     (runtime / 'build-info.json').write_text(json.dumps({
-        'runtime_version': '0.8.0',
+        'runtime_version': '0.8.3',
         'platform': 'PortMaster Linux aarch64',
         'firmware_specific_code': False,
         'in_game_runtime_hud': False,

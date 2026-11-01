@@ -118,6 +118,39 @@ constexpr const char* kBrowserScript = R"JS(// RPG2LX browser engine: runs in NW
         }
     });
 
+    // Memory on Linux (the handheld has 1 GB, shared with the GPU): what NW.js's processes hold (private and
+    // shared memory, RssAnon + RssShmem), what the system still has, and swap. Read asynchronously, so the game's
+    // thread never waits for /proc; each perf line shows the previous reading.
+    var memory = '';
+    function readMemory() {
+        if (!fs || process.platform !== 'linux') return;
+        var exe = process.execPath, info = {}, nwKb = 0, pending = 2;  // meminfo + the /proc listing
+        function done() {
+            if (--pending) return;
+            memory = ', nw ' + Math.round(nwKb / 1024) + ' MB, free ' + Math.round((info.MemAvailable || 0) / 1024) +
+                ' MB, swap ' + Math.round(((info.SwapTotal || 0) - (info.SwapFree || 0)) / 1024) + ' MB';
+        }
+        fs.readFile('/proc/meminfo', 'utf8', function (err, text) {
+            if (!err) text.replace(/^(\w+):\s+(\d+)/gm, function (all, key, kb) { info[key] = +kb; });
+            done();
+        });
+        fs.readdir('/proc', function (err, names) {
+            (names || []).forEach(function (pid) {
+                if (!/^\d+$/.test(pid)) return;
+                pending++;
+                fs.readFile('/proc/' + pid + '/cmdline', 'utf8', function (err, cmd) {
+                    if (err || cmd.indexOf(exe) !== 0) return done();
+                    fs.readFile('/proc/' + pid + '/status', 'utf8', function (err, status) {
+                        if (!err) status.replace(/^Rss(Anon|Shmem):\s+(\d+)/gm, function (all, kind, kb) { nwKb += +kb; });
+                        done();
+                    });
+                });
+            });
+            done();
+        });
+    }
+    readMemory();
+
     // One line every 10 s, like the native engine's "perf:" lines.
     var frames = 0, worst = 0, last = performance.now(), prev = last;
     (function tick() {
@@ -128,7 +161,8 @@ constexpr const char* kBrowserScript = R"JS(// RPG2LX browser engine: runs in NW
         if (now - last >= 10000) {
             var scene = window.SceneManager && SceneManager._scene;
             log('perf: ' + (frames * 1000 / (now - last)).toFixed(1) + ' fps, worst ' + worst.toFixed(0) + ' ms, scene ' +
-                (scene && scene.constructor.name) + ', heap ' + Math.round(((performance.memory || {}).usedJSHeapSize || 0) / 1048576) + ' MB');
+                (scene && scene.constructor.name) + ', js heap ' + Math.round(((performance.memory || {}).usedJSHeapSize || 0) / 1048576) + ' MB' + memory);
+            readMemory();
             frames = 0; worst = 0; last = now;
         }
         requestAnimationFrame(tick);
@@ -183,7 +217,29 @@ std::string gptk_key(const KeyInfo& key) {
 
 } // namespace
 
-const char* engine_label(Engine engine) { return engine == Engine::Browser ? "Navegador" : "Nativo"; }
+BrowserGpu browser_gpu(const fs::path& home) {
+    std::ifstream in(home / "config" / "browser-gpu.txt");
+    std::string first;
+    if (!std::getline(in, first)) return BrowserGpu::Unknown;
+    return first.rfind("none", 0) == 0 ? BrowserGpu::None : BrowserGpu::Found;
+}
+
+const char* engine_id(Engine engine) {
+    switch (engine) {
+        case Engine::Browser: return "browser";
+        case Engine::Auto: return "auto";
+        default: return "native";
+    }
+}
+
+std::string engine_label(Engine engine, BrowserGpu gpu) {
+    switch (engine) {
+        case Engine::Browser: return gpu == BrowserGpu::None ? "Navegador sin GPU" : "Navegador";
+        case Engine::Auto:
+            return gpu == BrowserGpu::Found ? "Auto (navegador)" : gpu == BrowserGpu::None ? "Auto (nativo)" : "Auto";
+        default: return "Nativo";
+    }
+}
 
 Engine load_engine(const fs::path& home, const std::string& game_id) {
     std::ifstream in(game_config_dir(home, game_id) / "engine.txt");
@@ -191,14 +247,13 @@ Engine load_engine(const fs::path& home, const std::string& game_id) {
     std::getline(in, value);
     if (value.rfind("native", 0) == 0) return Engine::Native;
     if (value.rfind("browser", 0) == 0) return Engine::Browser;
-    // Not chosen yet: the browser when NW.js is there (it runs every plugin), else native.
-    return browser_engine_installed(home) ? Engine::Browser : Engine::Native;
+    if (value.rfind("auto", 0) == 0) return Engine::Auto;
+    return browser_engine_installed(home) ? Engine::Auto : Engine::Native;
 }
 
 bool save_engine(const fs::path& home, const std::string& game_id, Engine engine) {
     std::string ignored;
-    return write_text(game_config_dir(home, game_id) / "engine.txt",
-                      engine == Engine::Browser ? "browser\n" : "native\n", ignored);
+    return write_text(game_config_dir(home, game_id) / "engine.txt", std::string(engine_id(engine)) + "\n", ignored);
 }
 
 bool browser_engine_installed(const fs::path& home) {
@@ -219,13 +274,16 @@ bool write_browser_app(const fs::path& home, const std::string& game_id, const f
 
     // Chromium switches for a 1 GB handheld: no background throttling (the game is the only window), files of
     // the game readable from its index.html (MV loads data/*.json with XHR), the Mali GPU used even though
-    // Chromium does not list it, and a small disk cache. The profile folder (--user-data-dir) is passed by
-    // RPG2LX.sh: it must live off the SD, whose FAT/exFAT cannot hold Chromium's SingletonLock symlink, and a
-    // path inside chromium-args would be split at its spaces.
+    // Chromium does not list it, one renderer process, and almost no disk caches: the profile lives in tmpfs,
+    // which is RAM, and is deleted after each game, so a cache there only costs memory. The profile folder
+    // (--user-data-dir) and the GPU switches are passed by RPG2LX.sh: a path inside chromium-args would be split
+    // at its spaces. V8 sizes its heap from the device's RAM, so there is no --max-old-space-size here: a lower
+    // cap would crash a big game instead of letting it use what the device has.
     const std::string args =
         "--allow-file-access-from-files --disable-background-timer-throttling --disable-renderer-backgrounding "
         "--disable-backgrounding-occluded-windows --ignore-gpu-blocklist --enable-gpu-rasterization "
-        "--disable-features=Translate,MediaRouter,OptimizationHints --disk-cache-size=8388608 "
+        "--disable-features=Translate,MediaRouter,OptimizationHints --renderer-process-limit=1 "
+        "--disk-cache-size=1048576 --media-cache-size=1048576 --disable-gpu-shader-disk-cache "
         "--autoplay-policy=no-user-gesture-required";
     std::ostringstream pkg;
     pkg << "{\n"

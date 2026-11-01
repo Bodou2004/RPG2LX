@@ -55,6 +55,8 @@ public:
     const ControlProfile& controls() const { return controls_; }
     // Engine of the game whose menu is open (saved per game in config/games/<id>/engine.txt).
     Engine engine() const { return engine_; }
+    // Whether Chromium got the GPU on this device, read when the game menu opens.
+    BrowserGpu browser_gpu_state() const { return browser_gpu_; }
     bool browser_available() const { return browser_engine_installed(library_.home()); }
     bool editing_global_controls() const { return controls_game_id_.empty(); }
 
@@ -82,6 +84,7 @@ private:
     ControlProfile controls_ = ControlProfile::defaults();
     std::string controls_game_id_;
     Engine engine_ = Engine::Native;
+    BrowserGpu browser_gpu_ = BrowserGpu::Unknown;
 };
 
 int run_launcher(GameLibrary& library, int smoke_frames = 0,

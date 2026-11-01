@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #ifdef RPG2LX_WITH_SDL
 #include <SDL.h>
@@ -46,6 +47,14 @@ public:
     // Executes one MV frame: async callbacks, `updates` 60 FPS logic updates (more than one catches up on a slow
     // device, like SceneManager.updateMain does), then one render.
     bool step_and_render(std::string& error, int updates = 1);
+
+    // Time spent drawing the scene natively since the last call, in ms (part of step_and_render's time).
+    double take_draw_ms();
+    // Sampling profile of the game's JavaScript since the last call: the `top` functions where the time went,
+    // then the `top` "function < caller" pairs, as log lines. Functions show as "name (file:line)", the line
+    // where they are defined. Time inside native calls counts for the JS function that made them; the scene
+    // drawing does not count (take_draw_ms). top = 0 just starts a new profile.
+    std::vector<std::string> take_js_profile(std::size_t top);
 
     int screen_width() const;
     int screen_height() const;

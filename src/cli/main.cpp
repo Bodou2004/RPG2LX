@@ -58,7 +58,7 @@ static int browser_app_command(int argc, char* argv[]) {
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.8.0 (RPG Maker MV HUB + runtime)\n";
+    std::cout << "rpg2lx version 0.8.3 (RPG Maker MV HUB + runtime)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 

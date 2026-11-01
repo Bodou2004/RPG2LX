@@ -1,0 +1,80 @@
+diff --git a/third_party/quickjs/quickjs.c b/third_party/quickjs/quickjs.c
+index d67dc95..1b64a19 100644
+--- a/third_party/quickjs/quickjs.c
++++ b/third_party/quickjs/quickjs.c
+@@ -553,7 +553,9 @@ enum {
+ 
+ /* must be large enough to have a negligible runtime cost and small
+    enough to call the interrupt callback often. */
+-#define JS_INTERRUPT_COUNTER_INIT 10000
++/* RPG2LX: 1000 instead of 10000, so the sampling profiler sees every ~0.1 ms of
++   JS on a handheld; the handler only reads a clock when it has nothing to do. */
++#define JS_INTERRUPT_COUNTER_INIT 1000
+ 
+ struct JSContext {
+     JSGCObjectHeader header; /* must come first */
+@@ -8157,6 +8159,35 @@ static const char *get_func_name(JSContext *ctx, JSValueConst func)
+     return JS_ToCString(ctx, val);
+ }
+ 
++/* RPG2LX: "name (file:line)" of the level-th stack frame (0 = the running
++   function), for RPG2LX's sampling profiler. The line is where the function
++   is defined: the running frame's pc is only saved at calls, so the line
++   being executed is not known. Returns -1 when there is no such frame. */
++int JS_GetStackFrameInfo(JSContext *ctx, int level, char *buf, size_t size)
++{
++    JSStackFrame *sf;
++    JSObject *p;
++    const char *name, *file;
++
++    for (sf = ctx->rt->current_stack_frame; sf && level > 0; sf = sf->prev_frame)
++        level--;
++    if (!sf || JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT || size == 0)
++        return -1;
++    p = JS_VALUE_GET_OBJ(sf->cur_func);
++    name = get_func_name(ctx, sf->cur_func);
++    if (js_class_has_bytecode(p->class_id)) {
++        JSFunctionBytecode *b = p->u.func.function_bytecode;
++        file = b->filename ? JS_AtomToCString(ctx, b->filename) : NULL;
++        snprintf(buf, size, "%s (%s:%d)", name && name[0] ? name : "<anonymous>",
++                 file ? file : "?", b->line_num);
++        JS_FreeCString(ctx, file);
++    } else {
++        snprintf(buf, size, "%s (native)", name && name[0] ? name : "<anonymous>");
++    }
++    JS_FreeCString(ctx, name);
++    return 0;
++}
++
+ /* Note: it is important that no exception is returned by this function */
+ static bool can_add_backtrace(JSValueConst obj)
+ {
+@@ -18181,6 +18212,13 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
+         print_func_name(b);
+ #endif
+ 
++    /* RPG2LX: poll on function entry too, not only on backward jumps, so
++       code made of calls without loops reaches the interrupt handler (RPG2LX's
++       sampling profiler) as often as loops do. Same state as if the first
++       opcode threw. */
++    if (unlikely(js_poll_interrupts(ctx)))
++        goto exception;
++
+  restart:
+     for(;;) {
+         int call_argc;
+diff --git a/third_party/quickjs/quickjs.h b/third_party/quickjs/quickjs.h
+index b5e5576..695f5e1 100644
+--- a/third_party/quickjs/quickjs.h
++++ b/third_party/quickjs/quickjs.h
+@@ -1186,6 +1186,10 @@ JS_EXTERN void JS_SetHostPromiseRejectionTracker(JSRuntime *rt, JSHostPromiseRej
+ /* return != 0 if the JS code needs to be interrupted */
+ typedef int JSInterruptHandler(JSRuntime *rt, void *opaque);
+ JS_EXTERN void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);
++/* RPG2LX: "name (file:line)" of the level-th stack frame (0 = the running
++   function), for a sampling profiler called from the interrupt handler.
++   Returns -1 when there is no such frame. */
++JS_EXTERN int JS_GetStackFrameInfo(JSContext *ctx, int level, char *buf, size_t size);
+ /* if can_block is true, Atomics.wait() can be used */
+ JS_EXTERN void JS_SetCanBlock(JSRuntime *rt, bool can_block);
+ /* set the [IsHTMLDDA] internal slot */

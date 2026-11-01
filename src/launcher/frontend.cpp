@@ -10,9 +10,11 @@
 #include "rpg2lx/mv_engine.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <set>
 #include <string>
@@ -38,6 +40,36 @@ bool set_render_vsync(SDL_Renderer* renderer, bool on) {
         return lib ? reinterpret_cast<SetVSync>(SDL_LoadFunction(lib, "SDL_RenderSetVSync")) : nullptr;
     }();
     return fn && fn(renderer, on ? 1 : 0) == 0;
+}
+
+// Memory of the process and of the system for the perf line, on Linux (the handheld has 1 GB, shared with the
+// GPU): ", rss 182 MB, free 412 MB, swap 0 MB". Empty elsewhere.
+std::string memory_summary() {
+#ifdef __linux__
+    auto kb = [](const char* file, std::initializer_list<const char*> keys) {
+        std::vector<long> values(keys.size(), -1);
+        std::ifstream in(file);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::size_t i = 0;
+            for (const char* key : keys) {
+                const std::size_t n = std::char_traits<char>::length(key);
+                if (line.compare(0, n, key) == 0) values[i] = std::strtol(line.c_str() + n, nullptr, 10);
+                ++i;
+            }
+        }
+        return values;
+    };
+    const auto self = kb("/proc/self/status", {"VmRSS:"});
+    const auto sys = kb("/proc/meminfo", {"MemAvailable:", "SwapTotal:", "SwapFree:"});
+    if (self[0] < 0 || sys[0] < 0) return {};
+    char text[96];
+    std::snprintf(text, sizeof text, ", rss %ld MB, free %ld MB, swap %ld MB", self[0] / 1024, sys[0] / 1024,
+                  sys[1] >= 0 && sys[2] >= 0 ? (sys[1] - sys[2]) / 1024 : 0L);
+    return text;
+#else
+    return {};
+#endif
 }
 
 SDL_Rect compute_aspect_viewport(int out_w, int out_h, int game_w, int game_h) {
@@ -131,7 +163,7 @@ bool write_launch_request(const std::filesystem::path& file, const rpg2lx::Launc
     std::ofstream out(file, std::ios::trunc);
     out << "project=" << request.project.u8string() << '\n'
         << "id=" << request.id << '\n'
-        << "engine=" << (request.engine == rpg2lx::Engine::Browser ? "browser" : "native") << '\n';
+        << "engine=" << rpg2lx::engine_id(request.engine) << '\n';
     return static_cast<bool>(out);
 }
 } // namespace
@@ -290,9 +322,13 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
     Uint32 last_axis = 0;
     Uint32 previous_time = SDL_GetTicks();
     const double perf_freq = static_cast<double>(SDL_GetPerformanceFrequency());
-    // Frame timings of the running game, written to the log every 10 seconds so a slow device can be measured.
+    // Frame timings of the running game, written to the log every 10 seconds so a slow device can be measured;
+    // every third line, when the game is slow, also where its JavaScript spends the time.
     double perf_step_ms = 0.0, perf_frame_ms = 0.0, perf_worst_ms = 0.0;
     int perf_frames = 0;
+    int perf_reports = 0;
+    double profile_step_ms = 0.0;
+    int profile_frames = 0;
     // Game time the running MV game is behind real time. A device too slow for 60 FPS runs up to kMaxCatchUp logic
     // updates per drawn frame, so the game keeps its real speed and only the drawing is skipped.
     constexpr double kTargetFrameMs = 1000.0 / 60.0;
@@ -592,29 +628,6 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
 
         SDL_RenderPresent(renderer.get());
 
-        if (in_mv && mv_engine && perf_frames > 0) {
-            const double frame_ms = static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0 / perf_freq;
-            perf_frame_ms += frame_ms;
-            perf_worst_ms = std::max(perf_worst_ms, frame_ms);
-            if (perf_frames >= 600) {
-                char line[200];
-                std::snprintf(line, sizeof line,
-                              "perf: %.1f fps drawn, game speed %.0f%%, game %.1f ms/frame (logic + drawing), frame %.1f ms, worst %.0f ms",
-                              1000.0 * perf_frames / perf_frame_ms, 100.0 * perf_updates * kTargetFrameMs / perf_frame_ms,
-                              perf_step_ms / perf_frames, perf_frame_ms / perf_frames, perf_worst_ms);
-                Logger::info(line);
-                perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
-                perf_frames = perf_updates = 0;
-            }
-        } else {
-            perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
-            perf_frames = perf_updates = 0;
-            mv_owed_ms = 0.0;
-            mv_last_pc = 0;
-            step_avg_ms = 0.0;
-            if (has_vsync && !vsync_on && set_render_vsync(renderer.get(), true)) vsync_on = true;
-        }
-
         // Caps the loop at 60 FPS by sleeping (a busy-wait keeps a core at 100% on the handheld, steals time from
         // the JS thread and heats the SoC). Also with vsync on: some handheld compositors (sway on ROCKNIX) return
         // from present early, and the game ran at 80 FPS, a third too fast. With a real 60 Hz vsync the frame has
@@ -622,6 +635,43 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
         if (smoke_frames == 0) {
             const double elapsed_ms = (static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0) / perf_freq;
             if (elapsed_ms + 1.0 < kTargetFrameMs) SDL_Delay(static_cast<Uint32>(kTargetFrameMs - elapsed_ms));
+        }
+
+        if (in_mv && mv_engine && perf_frames > 0) {
+            // Real time, sleep included: fps and game speed are what the player sees.
+            const double frame_ms = static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0 / perf_freq;
+            perf_frame_ms += frame_ms;
+            perf_worst_ms = std::max(perf_worst_ms, frame_ms);
+            if (perf_frame_ms >= 10000.0) {
+                const double draw_ms = mv_engine->take_draw_ms();
+                char line[240];
+                std::snprintf(line, sizeof line,
+                              "perf: %.1f fps, game speed %.0f%%, game %.1f ms/frame (js %.1f + drawing %.1f), frame %.1f ms, worst %.0f ms",
+                              1000.0 * perf_frames / perf_frame_ms, 100.0 * perf_updates * kTargetFrameMs / perf_frame_ms,
+                              perf_step_ms / perf_frames, std::max(0.0, perf_step_ms - draw_ms) / perf_frames,
+                              draw_ms / perf_frames, perf_frame_ms / perf_frames, perf_worst_ms);
+                Logger::info(line + memory_summary());
+                profile_step_ms += perf_step_ms;
+                profile_frames += perf_frames;
+                if (++perf_reports % 3 == 0) {
+                    // Every 30 s; only when the game misses 60 FPS (the profile says where to optimize).
+                    const bool slow = profile_step_ms / profile_frames > 14.0;
+                    for (const auto& profile_line : mv_engine->take_js_profile(slow ? 12 : 0)) Logger::info(profile_line);
+                    profile_step_ms = 0.0;
+                    profile_frames = 0;
+                }
+                perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
+                perf_frames = perf_updates = 0;
+            }
+        } else {
+            perf_step_ms = perf_frame_ms = perf_worst_ms = 0.0;
+            perf_frames = perf_updates = 0;
+            perf_reports = profile_frames = 0;
+            profile_step_ms = 0.0;
+            mv_owed_ms = 0.0;
+            mv_last_pc = 0;
+            step_avg_ms = 0.0;
+            if (has_vsync && !vsync_on && set_render_vsync(renderer.get(), true)) vsync_on = true;
         }
     }
 

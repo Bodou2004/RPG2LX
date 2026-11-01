@@ -88,18 +88,31 @@ request_value() {
     sed -n "s/^$1=//p" "$REQUEST" | head -n 1
 }
 
-# Prints the Chromium GPU switches that give WebGL a real GPU on this firmware. The first time, each candidate is
-# tried with a tiny NW.js page that reports its WebGL renderer; the winner (or "none", for CPU rendering) is kept
-# in config/browser-gpu.txt. Delete that file to probe again.
+# GPU kernel driver: ROCKNIX loads libmali (mali_kbase, its default on RK3326) or Mesa's panfrost, after its
+# gpu.driver setting.
+gpu_driver() {
+    grep -o -m 1 -E '^(mali_kbase|bifrost_kbase|midgard_kbase|panfrost|lima)' /proc/modules 2>/dev/null || echo unknown
+}
+
+# Prints the Chromium GPU switches that give WebGL a real GPU on this device, or nothing when none does. Each
+# candidate runs a tiny hidden NW.js page that reports its WebGL renderer; the first real GPU wins. The answer
+# is kept in config/browser-gpu.txt (switches or "none", the environment, the renderer) and probed again when
+# the GPU driver, the kernel or NW.js change.
+# Chromium normally draws in a separate GPU process, which needs a DRM render node and GBM: Mesa has them,
+# libmali does not, and ANGLE then gets no EGL config at all. --in-process-gpu draws in the main process through
+# the Wayland window instead, as SDL does, so it goes first.
 browser_gpu_flags() {
     local nwdir="$1" platform="$2" sandbox="$3"
-    local cache="$CONFDIR/browser-gpu.txt"
-    if [ -f "$cache" ]; then
+    local cache="$CONFDIR/browser-gpu.txt" blog="$GAMEDIR/logs/browser.log"
+    local key
+    key="driver=$(gpu_driver) kernel=$(uname -r) nw=$(stat -c %s "$nwdir/lib/libnw.so" 2>/dev/null)"
+    if [ -f "$cache" ] && [ "$(sed -n 2p "$cache")" = "$key" ]; then
         local saved
         saved="$(head -n 1 "$cache")"
         [ "$saved" != "none" ] && printf '%s' "$saved"
         return
     fi
+    echo "=== GPU probe | $key" >> "$blog"
     local probe="/tmp/rpg2lx-nw/probe" out="/tmp/rpg2lx-nw/probe.txt"
     mkdir -p "$probe/app"
     cat > "$probe/app/package.json" <<'EOF'
@@ -120,30 +133,38 @@ nw.App.quit();
 </script>
 EOF
     local candidate renderer
-    for candidate in "" "--use-angle=gles" "--use-gl=angle --use-angle=gles-egl" "--use-gl=egl"; do
+    for candidate in "--in-process-gpu" "--in-process-gpu --use-angle=gles" "--use-angle=default" "--use-angle=gles"; do
         rm -rf "$out" "$probe/profile"
         RPG2LX_GPU_PROBE="$out" LD_LIBRARY_PATH="$nwdir/lib:$nwdir/syslibs:$LD_LIBRARY_PATH" \
-            timeout 20 "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox --ignore-gpu-blocklist $candidate \
-            "--user-data-dir=$probe/profile" "$probe/app" >/dev/null 2>&1
+            timeout 15 "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox --ignore-gpu-blocklist $candidate \
+            "--user-data-dir=$probe/profile" "$probe/app" > "$probe/stderr.txt" 2>&1
         renderer="$(cat "$out" 2>/dev/null)"
-        echo "=== GPU probe [${candidate:-default}]: ${renderer:-no answer}" >> "$GAMEDIR/logs/browser.log"
+        echo "=== GPU probe [$candidate]: ${renderer:-no answer}" >> "$blog"
+        # Chromium's own GPU messages, to see why a candidate fails.
+        grep -i -E 'egl|gl_|gpu|angle|wayland|config' "$probe/stderr.txt" | grep -v 'dbus/' | tail -n 4 | sed 's/^/      /' >> "$blog"
         case "$renderer" in
             ""|no-webgl|error*|*SwiftShader*|*llvmpipe*|*softpipe*) ;;
             *)
-                printf '%s\n%s\n' "${candidate:---ignore-gpu-blocklist}" "$renderer" > "$cache"
-                printf '%s' "${candidate:---ignore-gpu-blocklist}"
+                printf '%s\n%s\n%s\n' "$candidate" "$key" "$renderer" > "$cache"
+                rm -rf "$probe"
+                printf '%s' "$candidate"
                 return
                 ;;
         esac
     done
-    echo none > "$cache"
+    printf 'none\n%s\n' "$key" > "$cache"
+    rm -rf "$probe"
+    case "$key" in
+        *mali_kbase*) echo "=== No GPU for Chromium with libmali. ROCKNIX can load Mesa's panfrost instead (its GPU driver setting); RPG2LX probes again by itself after that." >> "$blog" ;;
+    esac
 }
 
 # Browser engine: the game runs in NW.js (Chromium + Node, what MV exports ship with). It draws straight into the
-# firmware's Wayland compositor (sway on ROCKNIX) or X11; no extra runtime is mounted. Returns 3 when NW.js could
-# not start at all, so the caller can fall back to the native engine.
+# firmware's Wayland compositor (sway on ROCKNIX) or X11; no extra runtime is mounted. mode "auto" only runs it
+# when Chromium gets the GPU; "browser" runs it anyway. Returns 3 when NW.js was not used or could not start at
+# all, so the caller runs the native engine.
 run_browser() {
-    local project="$1" game_id="$2"
+    local project="$1" game_id="$2" mode="$3"
     local nwdir="$GAMEDIR/nwjs"
     local blog="$GAMEDIR/logs/browser.log"
     if [ ! -f "$nwdir/nw" ]; then
@@ -154,10 +175,6 @@ run_browser() {
     while read -r exe; do
         [ -n "$exe" ] && chmod +x "$nwdir/$exe" 2>/dev/null
     done < "$nwdir/EXECUTABLES.txt"
-
-    local gptk="$CONFDIR/games/$game_id/browser.gptk"
-    local app
-    app="$("$BIN" browser-app --home "$GAMEDIR" --game-id "$game_id" --project "$project" --gptk "$gptk")" || return 3
 
     # The compositor's variables, when the port was started without them.
     if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ -f /etc/profile ]; then
@@ -180,21 +197,28 @@ run_browser() {
     # ROCKNIX runs ports as root, where Chromium refuses to start with its sandbox on.
     local sandbox=""
     [ "$(id -u)" = "0" ] && sandbox="--no-sandbox"
+    unset DBUS_SESSION_BUS_ADDRESS
 
-    echo "=== $(date) | $game_id | $platform WAYLAND_DISPLAY=$WAYLAND_DISPLAY DISPLAY=$DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$blog"
+    local gpu_flags
+    gpu_flags="$(browser_gpu_flags "$nwdir" "$platform" "$sandbox")"
+    if [ -z "$gpu_flags" ] && [ "$mode" = "auto" ]; then
+        echo "=== $(date) | $game_id | Auto: Chromium has no GPU here (config/browser-gpu.txt), native engine" >> "$blog"
+        return 3
+    fi
+
+    local gptk="$CONFDIR/games/$game_id/browser.gptk"
+    local app
+    app="$("$BIN" browser-app --home "$GAMEDIR" --game-id "$game_id" --project "$project" --gptk "$gptk")" || return 3
+
+    echo "=== $(date) | $game_id | $platform WAYLAND_DISPLAY=$WAYLAND_DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR | GPU: ${gpu_flags:-none, CPU drawing}" >> "$blog"
     $GPTOKEYB "nw" -c "$gptk" &
     command -v portmaster_sway_fullscreen.sh >/dev/null 2>&1 && portmaster_sway_fullscreen.sh nw >/dev/null 2>&1 &
 
-    # Chromium's profile goes to tmpfs: the SD's FAT/exFAT cannot hold its SingletonLock symlink. Saves do not
-    # live there (they go to saves/<id>/), so losing it on reboot costs nothing.
+    # Chromium's profile goes to tmpfs: the SD's FAT/exFAT cannot hold its SingletonLock symlink. tmpfs is RAM, so
+    # it starts empty and is deleted afterwards; saves do not live there (they go to saves/<id>/).
     local profile="/tmp/rpg2lx-nw/$(printf '%s' "$game_id" | tr -c 'A-Za-z0-9._-' '_')"
+    rm -rf "$profile"
     mkdir -p "$profile"
-    rm -f "$profile/SingletonLock" "$profile/SingletonSocket" "$profile/SingletonCookie"
-
-    unset DBUS_SESSION_BUS_ADDRESS
-    local gpu_flags
-    gpu_flags="$(browser_gpu_flags "$nwdir" "$platform" "$sandbox")"
-    echo "=== GPU flags: ${gpu_flags:-(none: CPU rendering)}" >> "$blog"
 
     local started=$SECONDS
     # nwjs/syslibs carries the NSS libraries the firmware lacks; everything else comes from the system.
@@ -203,9 +227,11 @@ run_browser() {
         "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox $gpu_flags "--user-data-dir=$profile" "$app" >> "$blog" 2>&1
     local status=$?
     pm_gptokeyb_finish 2>/dev/null || $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
+    rm -rf "$profile"
     echo "=== NW.js exited with $status after $((SECONDS - started)) s" >> "$blog"
     # A crash within a few seconds is a start failure (missing library, no display), not the player quitting.
-    if [ "$status" -ne 0 ] && [ $((SECONDS - started)) -lt 8 ]; then
+    # Select+Start kills NW.js (137, SIGKILL) and is the player's choice, as is a SIGTERM (143).
+    if [ "$status" -ne 0 ] && [ "$status" -ne 137 ] && [ "$status" -ne 143 ] && [ $((SECONDS - started)) -lt 8 ]; then
         return 3
     fi
     return "$status"
@@ -226,10 +252,10 @@ while true; do
     echo "--- Launch: $game_id (${engine:-native}) $(date) ---"
     set_performance_governor
     GAME_STATUS=3
-    if [ "$engine" = "browser" ]; then
-        run_browser "$project" "$game_id"
+    if [ "$engine" = "browser" ] || [ "$engine" = "auto" ]; then
+        run_browser "$project" "$game_id" "$engine"
         GAME_STATUS=$?
-        [ "$GAME_STATUS" -eq 3 ] && echo "Browser engine could not start (see logs/browser.log); using the native engine"
+        [ "$GAME_STATUS" -eq 3 ] && echo "Browser engine not used (see logs/browser.log); using the native engine"
     fi
     if [ "$GAME_STATUS" -eq 3 ]; then
         "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"

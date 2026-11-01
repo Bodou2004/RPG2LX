@@ -1,6 +1,46 @@
 # Estado de RPG2LX
 
-2026-11-01 — versión 0.8.0.
+2026-11-01 — versión 0.8.3.
+
+## GPU del navegador, motor Auto y medición en la consola (0.8.1–0.8.3)
+
+**Medido en la K36 (ROCKNIX 20260809):**
+
+- 0.8.0 no llegó a abrir NW.js. Chromium no podía crear su perfil en la SD: FAT/exFAT no admite el enlace `SingletonLock`, y una ruta con espacios se partía. Todos los juegos acababan en el motor nativo. Desde 0.8.1 el perfil va a tmpfs (`/tmp/rpg2lx-nw/<id>`); desde 0.8.3 se borra antes y después de cada juego, porque tmpfs ocupa RAM.
+- Con NW.js ya arrancando, Chromium dibujaba con la CPU: 1–3 fps en los mapas de Domina y F&H. En los ajustes probados ANGLE responde `eglInitialize: No configs were generated` y Chromium cierra su proceso de GPU.
+- Causa: ROCKNIX usa en RK3326 el driver cerrado **libmali** por defecto. Su `gpudriver`, con el ajuste `gpu.driver`, monta `/usr/lib/mali/*` encima de `libEGL`. El log lo confirma con `arm_release_ver: g24p0`. El proceso de GPU de Chromium necesita un nodo render DRM y GBM, y libmali no los tiene. SDL sí funciona porque dibuja en la ventana de Wayland.
+- Motor nativo con F&H en la consola: 80–600 ms por frame (8–48 % de velocidad de juego).
+- Las líneas de "270 fps, 450 %" eran un error de medida. Se medía antes de la espera que limita a 60 FPS, así que contaba el trabajo y no el tiempo real.
+
+**Cambios:**
+
+- Prueba de GPU (`RPG2LX.sh`, `browser_gpu_flags`):
+  - Prueba primero `--in-process-gpu`, que dibuja en el proceso principal a través de la ventana de Wayland, como SDL.
+  - Después prueba los ajustes de ANGLE con proceso de GPU, que sirven con panfrost (Mesa).
+  - El resultado se guarda en `config/browser-gpu.txt` junto con el driver, el kernel y NW.js, y se repite si alguno cambia.
+  - Por cada intento se escriben en `browser.log` las líneas de GPU de Chromium.
+  - Si nada funciona con libmali, el log sugiere probar panfrost en ROCKNIX.
+- Motor **Auto**, nuevo por defecto: el navegador si la prueba encontró GPU, el nativo si no. "Navegador" lo fuerza aunque dibuje con la CPU, y el HUB lo marca como "Navegador sin GPU". Lo ya elegido en `engine.txt` se respeta.
+- Ya no se pasa al motor nativo cuando el jugador cierra NW.js en los primeros segundos (Select+Start, 137) ni por un SIGTERM (143). gptokeyb arranca después de la prueba, así que Select+Start no puede matarla.
+- Memoria, como pidieron las revisiones externas:
+  - Chromium con 1 MB de caché de disco y de medios, sin caché de shaders en disco y con un solo proceso de renderizado.
+  - Sin `--max-old-space-size`: V8 ya calcula su heap a partir de la RAM, y un límite menor tiraría un juego grande en vez de dejarle usar la memoria que hay.
+- Las líneas `perf:` llevan la memoria:
+  - Motor nativo: `rss` del proceso, `free` (MemAvailable) y `swap`.
+  - Navegador: `nw` (RssAnon + RssShmem de todos sus procesos, leído sin bloquear el juego), `free` y `swap`.
+- Motor nativo:
+  - La línea `perf:` usa tiempo real, sale cada 10 s aunque el juego vaya lento y separa el tiempo de JS del de dibujo.
+  - **Perfilador por muestreo** de JavaScript: cada 30 s, si el juego no llega a 60 FPS, escribe en `launcher.log` las 12 funciones más pesadas y los pares "función < quien la llama", como `nombre (archivo:línea donde está definida)`. El tiempo de las llamadas nativas cuenta para la función JS que las hace; el dibujo de la escena va aparte.
+  - Para el perfilador, QuickJS mira las interrupciones también al entrar en cada función y cada 1000 pasos en vez de 10000. Está en `rpg2lx-profiler.patch`.
+  - `mv_probe` tiene el comando `profile N`.
+- `ctx.save()`/`restore()` del shim de Canvas sin `for…in` ni objetos de 21 claves; TerraxLighting los llama en cada luz. En PC, selección de personaje de F&H: `restore` pasa del 9 % del JS a no aparecer, y el frame de 4,74 a 4,57 ms.
+- HUB: la fila Motor se veía `< < Navegador > >`.
+
+**Perfil en PC** (F&H, selección de personaje, 4,6 ms por frame, casi todo JS):
+
+- Lo más pesado es el código estándar de MV para las 100 imágenes de pantalla: `Game_Screen.realPictureId`, `Array.prototype.equals` desde `Sprite.setColorTone`, y `Sprite_Picture.update*`.
+- Le sigue TerraxLighting.
+- Es código del juego que QuickJS interpreta. En la A35 va unas 20–30 veces más lento que en PC.
 
 ## Motor navegador (0.8.0)
 
@@ -9,7 +49,7 @@
   - SAOR DOMINA: partida nueva, mapa 26, ~60 fps, guardado en `saves/<id>/`.
   - Fear & Hunger 1.4.1: partida nueva, mapa 72, ~60 fps, guardado. Su único error es el `SyntaxError` de su propio `physical_attack_animation.js`, que también sale en el juego original.
 - Las dependencias de NW.js ARM64 y sus versiones de glibc se comprobaron contra el `SYSTEM` real de ROCKNIX 20260809.
-- **No probado en la consola:** arranque bajo sway, GPU Mali con Chromium, memoria con 1 GB y rendimiento.
+- En la consola no llegó a arrancar; ver la sección 0.8.1–0.8.3.
 
 ## Robustez (0.7.6)
 

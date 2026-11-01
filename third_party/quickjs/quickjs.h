@@ -1186,6 +1186,10 @@ JS_EXTERN void JS_SetHostPromiseRejectionTracker(JSRuntime *rt, JSHostPromiseRej
 /* return != 0 if the JS code needs to be interrupted */
 typedef int JSInterruptHandler(JSRuntime *rt, void *opaque);
 JS_EXTERN void JS_SetInterruptHandler(JSRuntime *rt, JSInterruptHandler *cb, void *opaque);
+/* RPG2LX: "name (file:line)" of the level-th stack frame (0 = the running
+   function), for a sampling profiler called from the interrupt handler.
+   Returns -1 when there is no such frame. */
+JS_EXTERN int JS_GetStackFrameInfo(JSContext *ctx, int level, char *buf, size_t size);
 /* if can_block is true, Atomics.wait() can be used */
 JS_EXTERN void JS_SetCanBlock(JSRuntime *rt, bool can_block);
 /* set the [IsHTMLDDA] internal slot */

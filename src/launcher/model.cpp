@@ -3,6 +3,7 @@
 #include "rpg2lx/mv_engine.hpp"
 #include "rpg2lx/project_source.hpp"
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 namespace rpg2lx {
@@ -98,11 +99,12 @@ void LauncherModel::play_selected() {
         if (!hub_mode_) open_project(game->project);
         return;
     }
-    const Engine engine = load_engine(library_.home(), game->id);
+    Engine engine = load_engine(library_.home(), game->id);
     if (engine == Engine::Browser && (!hub_mode_ || !browser_engine_installed(library_.home()))) {
         message_ = hub_mode_ ? "Falta NW.js en la carpeta rpg2lx/nwjs/." : "El motor navegador solo funciona desde PortMaster.";
         return;
     }
+    if (engine == Engine::Auto && (!hub_mode_ || !browser_engine_installed(library_.home()))) engine = Engine::Native;
     if (hub_mode_) {
         const auto resolved = resolve_mv_project(game->project);
         launch_request_ = LaunchRequest{resolved ? resolved.source->root : game->project, game->id, engine};
@@ -186,9 +188,12 @@ void LauncherModel::act(MenuAction action) {
         else if (action == MenuAction::Play) play_selected();
         else if (item == GameMenuItem::Engine &&
                  (action == MenuAction::Left || action == MenuAction::Right || action == MenuAction::Confirm)) {
-            engine_ = engine_ == Engine::Native ? Engine::Browser : Engine::Native;
+            // Auto -> Navegador -> Nativo, Left goes backwards.
+            static constexpr std::array<Engine, 3> kOrder{Engine::Auto, Engine::Browser, Engine::Native};
+            const auto at = static_cast<std::size_t>(std::find(kOrder.begin(), kOrder.end(), engine_) - kOrder.begin());
+            engine_ = kOrder[(at + (action == MenuAction::Left ? kOrder.size() - 1 : 1)) % kOrder.size()];
             save_engine(library_.home(), game->id, engine_);
-            message_ = engine_ == Engine::Browser && !browser_available() ? "Falta NW.js en la carpeta rpg2lx/nwjs/." : "";
+            message_ = engine_ != Engine::Native && !browser_available() ? "Falta NW.js en la carpeta rpg2lx/nwjs/." : "";
         } else if (action == MenuAction::Confirm) {
             switch (item) {
                 case GameMenuItem::Play: play_selected(); break;
@@ -227,6 +232,7 @@ void LauncherModel::act(MenuAction action) {
     screen_ = HubScreen::GameMenu;
     menu_index_ = 0;
     engine_ = load_engine(library_.home(), selected()->id);
+    browser_gpu_ = browser_gpu(library_.home());
     message_.clear();
 }
 } // namespace rpg2lx

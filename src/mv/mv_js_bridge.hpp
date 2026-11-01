@@ -627,22 +627,28 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
             _dash: [],
             _clips: [],
 
+            // The state goes into a flat array, 21 values per save: lighting plugins save and restore around
+            // every light, and QuickJS is slow with for-in and with 21-key object literals. _m, _clips and
+            // _dash are always replaced, never changed in place, so they are kept by reference.
             save: function() {
-                stack.push({
-                    font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline,
-                    fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth,
-                    lineCap: this.lineCap, lineJoin: this.lineJoin, miterLimit: this.miterLimit,
-                    lineDashOffset: this.lineDashOffset, _dash: this._dash.slice(),
-                    globalAlpha: this.globalAlpha, globalCompositeOperation: this.globalCompositeOperation,
-                    shadowColor: this.shadowColor, shadowBlur: this.shadowBlur,
-                    shadowOffsetX: this.shadowOffsetX, shadowOffsetY: this.shadowOffsetY,
-                    imageSmoothingEnabled: this.imageSmoothingEnabled, filter: this.filter,
-                    _m: this._m.slice(), _clips: this._clips.slice()
-                });
+                stack.push(this.font, this.textAlign, this.textBaseline, this.fillStyle, this.strokeStyle,
+                           this.lineWidth, this.lineCap, this.lineJoin, this.miterLimit, this.lineDashOffset,
+                           this._dash, this.globalAlpha, this.globalCompositeOperation, this.shadowColor,
+                           this.shadowBlur, this.shadowOffsetX, this.shadowOffsetY, this.imageSmoothingEnabled,
+                           this.filter, this._m, this._clips);
             },
             restore: function() {
-                var st = stack.pop();
-                if (st) for (var k in st) this[k] = st[k];
+                var s = stack.length - 21;
+                if (s < 0) return;
+                this.font = stack[s]; this.textAlign = stack[s + 1]; this.textBaseline = stack[s + 2];
+                this.fillStyle = stack[s + 3]; this.strokeStyle = stack[s + 4]; this.lineWidth = stack[s + 5];
+                this.lineCap = stack[s + 6]; this.lineJoin = stack[s + 7]; this.miterLimit = stack[s + 8];
+                this.lineDashOffset = stack[s + 9]; this._dash = stack[s + 10]; this.globalAlpha = stack[s + 11];
+                this.globalCompositeOperation = stack[s + 12]; this.shadowColor = stack[s + 13];
+                this.shadowBlur = stack[s + 14]; this.shadowOffsetX = stack[s + 15]; this.shadowOffsetY = stack[s + 16];
+                this.imageSmoothingEnabled = stack[s + 17]; this.filter = stack[s + 18]; this._m = stack[s + 19];
+                this._clips = stack[s + 20];
+                stack.length = s;
             },
             reset: function() { stack.length = 0; this.resetTransform(); this._clips = []; this._cmds = []; this.clearRect(0, 0, canvas.width, canvas.height); },
 

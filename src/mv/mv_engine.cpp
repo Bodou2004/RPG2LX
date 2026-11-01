@@ -129,6 +129,11 @@ void nbmp_finalizer(JSRuntime* /*rt*/, JSValue val) {
     }
 }
 
+std::int64_t mono_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 } // namespace
 
 struct MvEngine::Impl {
@@ -175,6 +180,56 @@ struct MvEngine::Impl {
 #ifdef RPG2LX_WITH_SDL
     MvSceneRenderer scene_renderer;
 #endif
+
+    // Sampling profile of the game's JavaScript (take_js_profile). QuickJS calls the interrupt handler every
+    // ~1000 function entries or loop jumps; every kProfileSampleNs it charges the time since the previous sample
+    // to the running function, and to the pair "running < caller". Native calls count for the JS function that
+    // made them, except the scene drawing, which has its own clock (draw_ns).
+    static constexpr std::int64_t kProfileSampleNs = 2'000'000;
+    std::int64_t profile_last_ns = 0;  // 0: no JS ran since the last boundary (frame start, scene drawing)
+    bool profile_paused = false;       // the drawing reads JS getters; that time is the drawing's
+    std::unordered_map<std::string, double> profile_self_ms;
+    std::unordered_map<std::string, double> profile_pair_ms;
+    double profile_total_ms = 0.0;
+    std::int64_t draw_ns = 0;
+
+    // level: stack frames to skip (1 from inside a native callback, whose own frame is on top).
+    void profile_sample(bool force, int level = 0) {
+        if (profile_paused) return;
+        const std::int64_t now = mono_ns();
+        if (profile_last_ns == 0) {
+            profile_last_ns = now;
+            return;
+        }
+        const std::int64_t elapsed = now - profile_last_ns;
+        if (!force && elapsed < kProfileSampleNs) return;
+        profile_last_ns = now;
+        char top[192];
+        if (!ctx || JS_GetStackFrameInfo(ctx, level, top, sizeof top) != 0) return;
+        const double ms = static_cast<double>(elapsed) / 1e6;
+        profile_total_ms += ms;
+        profile_self_ms[top] += ms;
+        char caller[192];
+        if (JS_GetStackFrameInfo(ctx, level + 1, caller, sizeof caller) == 0)
+            profile_pair_ms[std::string(top) + "  <  " + caller] += ms;
+    }
+
+    // Native scene drawing, called from JS: the JS before it is charged now, the drawing goes to draw_ns.
+    template <typename Draw>
+    void timed_draw(Draw&& draw) {
+        if (profile_paused) {  // drawing inside a drawing (a snapshot taken while rendering)
+            draw();
+            return;
+        }
+        profile_sample(true, 1);  // the JS before the call, charged to the function that called renderStage
+        const std::int64_t start = mono_ns();
+        profile_paused = true;
+        draw();
+        profile_paused = false;
+        const std::int64_t end = mono_ns();
+        draw_ns += end - start;
+        profile_last_ns = end;
+    }
 
     ~Impl() {
         shutdown();
@@ -1217,7 +1272,7 @@ JSValue cb_render_stage(JSContext* ctx, JSValueConst, int argc, JSValueConst* ar
         int32_t w = im->screen_w, h = im->screen_h;
         JS_ToInt32(ctx, &w, argv[1]);
         JS_ToInt32(ctx, &h, argv[2]);
-        im->scene_renderer.render_stage(ctx, argv[0], w, h);
+        im->timed_draw([&] { im->scene_renderer.render_stage(ctx, argv[0], w, h); });
     }
 #else
     (void)ctx; (void)argc; (void)argv;
@@ -1233,7 +1288,7 @@ JSValue cb_render_stage_to_bmp(JSContext* ctx, JSValueConst, int argc, JSValueCo
         int32_t w = im->screen_w, h = im->screen_h;
         JS_ToInt32(ctx, &w, argv[2]);
         JS_ToInt32(ctx, &h, argv[3]);
-        if (target) im->scene_renderer.render_stage_to_bitmap(ctx, argv[0], target, w, h);
+        if (target) im->timed_draw([&] { im->scene_renderer.render_stage_to_bitmap(ctx, argv[0], target, w, h); });
     }
 #else
     (void)ctx; (void)argc; (void)argv;
@@ -1540,6 +1595,10 @@ bool MvEngine::boot(const fs::path& project_path,
     }
     JS_SetContextOpaque(impl_->ctx, impl_.get());
     impl_->atoms.init(impl_->ctx);
+    JS_SetInterruptHandler(impl_->rt, [](JSRuntime*, void* opaque) -> int {
+        static_cast<Impl*>(opaque)->profile_sample(false);
+        return 0;
+    }, impl_.get());
 
 #ifdef RPG2LX_WITH_SDL
     impl_->scene_renderer.init(renderer, impl_->nbmp_class_id, &impl_->atoms);
@@ -1707,6 +1766,7 @@ bool MvEngine::step_and_render(std::string& error, int updates) {
         error = "MvEngine not initialized";
         return false;
     }
+    impl_->profile_last_ns = mono_ns();  // the time between frames is not the game's
 
     if (JS_IsFunction(impl_->ctx, impl_->fn_drain)) {
         JSValue r1 = JS_Call(impl_->ctx, impl_->fn_drain, JS_UNDEFINED, 0, nullptr);
@@ -1728,12 +1788,49 @@ bool MvEngine::step_and_render(std::string& error, int updates) {
     }
 
     impl_->frames += static_cast<std::uint64_t>(updates);
+    impl_->profile_sample(true);  // the JS since the last sample
+    impl_->profile_last_ns = 0;
 
     if (!impl_->fatal_error.empty()) {
         error = impl_->fatal_error;
         return false;
     }
     return error.empty();
+}
+
+double MvEngine::take_draw_ms() {
+    const double ms = static_cast<double>(impl_->draw_ns) / 1e6;
+    impl_->draw_ns = 0;
+    return ms;
+}
+
+std::vector<std::string> MvEngine::take_js_profile(std::size_t top) {
+    std::vector<std::string> lines;
+    const double total = impl_->profile_total_ms;
+    if (top > 0 && total > 0.0) {
+        auto heaviest = [&](const std::unordered_map<std::string, double>& map, const char* title) {
+            std::vector<std::pair<double, const std::string*>> sorted;
+            sorted.reserve(map.size());
+            for (const auto& [where, ms] : map) sorted.emplace_back(ms, &where);
+            const std::size_t n = std::min(top, sorted.size());
+            std::partial_sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(n), sorted.end(),
+                              [](const auto& a, const auto& b) { return a.first > b.first; });
+            lines.emplace_back(title);
+            for (std::size_t i = 0; i < n; ++i) {
+                char head[48];
+                std::snprintf(head, sizeof head, "  %5.1f%% %7.0f ms  ", 100.0 * sorted[i].first / total, sorted[i].first);
+                lines.push_back(head + *sorted[i].second);
+            }
+        };
+        char title[96];
+        std::snprintf(title, sizeof title, "js profile: %.0f ms of JavaScript (scene drawing apart), heaviest functions:", total);
+        heaviest(impl_->profile_self_ms, title);
+        heaviest(impl_->profile_pair_ms, "js profile: heaviest function < caller:");
+    }
+    impl_->profile_self_ms.clear();
+    impl_->profile_pair_ms.clear();
+    impl_->profile_total_ms = 0.0;
+    return lines;
 }
 
 int MvEngine::screen_width() const { return impl_->screen_w; }

@@ -6,10 +6,19 @@ namespace rpg2lx {
 
 // Browser engine: the game runs in NW.js (Chromium + Node), the same runtime RPG Maker MV exports ship with, for
 // plugins the native engine cannot run or runs slowly. NW.js lives in <home>/nwjs/.
-enum class Engine { Native, Browser };
+// Auto: the browser when Chromium can draw with the GPU on this device (RPG2LX.sh probes it once and keeps the
+// answer in config/browser-gpu.txt), the native engine otherwise. Browser forces it, even drawing on the CPU.
+enum class Engine { Native, Browser, Auto };
 
-const char* engine_label(Engine engine);
-// The game's chosen engine; without a choice, Browser when NW.js is installed.
+// What RPG2LX.sh found about Chromium and the GPU: not probed yet, a real GPU, or CPU drawing only.
+enum class BrowserGpu { Unknown, Found, None };
+BrowserGpu browser_gpu(const std::filesystem::path& home);
+
+// "native", "browser" or "auto": engine.txt and the launch request.
+const char* engine_id(Engine engine);
+// HUB text for the game menu, with what Auto picks once the GPU is known ("Auto (nativo)").
+std::string engine_label(Engine engine, BrowserGpu gpu);
+// The game's chosen engine; without a choice, Auto when NW.js is installed, else Native.
 Engine load_engine(const std::filesystem::path& home, const std::string& game_id);
 bool save_engine(const std::filesystem::path& home, const std::string& game_id, Engine engine);
 bool browser_engine_installed(const std::filesystem::path& home);
