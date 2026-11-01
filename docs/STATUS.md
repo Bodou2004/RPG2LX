@@ -58,7 +58,7 @@ GitHub Actions (`.github/workflows/ci.yml`) corre en cada push y pull request:
 
 - Linux x86_64 sin SDL: build CMake y `ctest` completo.
 - Linux x86_64 con SDL2 (apt, `SDL_VIDEODRIVER=dummy`): `MvEngineTests` y `GameViewTests`. La prueba con `NewData` de Steam se salta sola.
-- Windows x64 (MSVC) sin SDL: build CMake y `ctest`.
+- Windows x64 (Clang + Ninja; QuickJS no compila con MSVC) sin SDL: build CMake y `ctest`.
 - Compilación cruzada aarch64 con Zig 0.13.0 (`tools/build_arm64.py`): solo compila; el binario queda como artefacto. No se ejecuta.
 
 La CI no sustituye la prueba en consola ni la prueba de Domina.
