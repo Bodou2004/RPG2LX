@@ -36,13 +36,13 @@ jobs:
         run: ctest --test-dir build/ci --output-on-failure -R "MvEngineTests|GameViewTests"
 
   windows:
-    # QuickJS does not build with MSVC; use the runner's Clang (same family as Zig locally).
-    name: Windows x64 (Clang, no SDL)
+    # QuickJS does not build with MSVC; use the runner's MinGW-w64 GCC.
+    name: Windows x64 (MinGW GCC, no SDL)
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DRPG2LX_WITH_SDL=OFF
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DRPG2LX_WITH_SDL=OFF
       - name: Build
         run: cmake --build build/ci --parallel
       - name: Test
