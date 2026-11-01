@@ -4,7 +4,7 @@ Todo lo que se compila dentro del binario o se distribuye en el paquete de la SD
 
 | Componente | Origen | Licencia | Uso en RPG2LX | En el paquete |
 |---|---|---|---|---|
-| QuickJS | `third_party/quickjs`, de Fabrice Bellard y Charlie Gordon | MIT | Motor JavaScript que ejecuta los corescripts y plugins. Modificación local marcada `RPG2LX` en `quickjs.c`: `RegExp.$1`–`$9` y el resto de estáticos antiguos de `RegExp`. | `QuickJS-LICENSE.txt` |
+| QuickJS | `third_party/quickjs`, de Fabrice Bellard y Charlie Gordon | MIT | Motor JavaScript que ejecuta los corescripts y plugins. Modificación local marcada `RPG2LX` en `quickjs.c`: `RegExp.$1`–`$9` y el resto de estáticos antiguos de `RegExp`, también como `rpg2lx-regexp-legacy.patch`. | `QuickJS-LICENSE.txt` |
 | canvas_ity | `third_party/canvas_ity` | ISC | Rasterizador de Canvas 2D para trazados, curvas, degradados, patrones, transformaciones y recortes. | `canvas_ity-LICENSE.txt` |
 | stb_image 2.30 | `third_party/stb`, de [nothings/stb](https://github.com/nothings/stb) | MIT o dominio público, a elegir | Decodificación de PNG. No se usan sus funciones de apertura de archivos: RPG2LX lee con rutas de filesystem para soportar Unicode. | `stb-LICENSE.txt` |
 | stb_vorbis | `third_party/stb` | MIT o dominio público, a elegir | Decodificación de audio OGG. | `stb-LICENSE.txt` (misma licencia) |

@@ -25,7 +25,7 @@ void print_help() {
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.7.5 (RPG Maker MV HUB + runtime)\n";
+    std::cout << "rpg2lx version 0.7.6 (RPG Maker MV HUB + runtime)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 

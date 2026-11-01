@@ -537,7 +537,8 @@ struct NativeBitmap {
             for (int x = x0; x < x1; ++x) {
                 const float dx = static_cast<float>(x + 0.5 - cx);
                 const float t = (std::sqrt(dx * dx + dy * dy) - fr0) * k;
-                const std::uint32_t c = lut[t <= 0.0f ? 0 : t >= 255.0f ? 255 : static_cast<int>(t + 0.5f)];
+                // `!(t > 0)` also catches NaN, which must never reach the index.
+                const std::uint32_t c = lut[!(t > 0.0f) ? 0 : t >= 255.0f ? 255 : static_cast<int>(t + 0.5f)];
                 std::uint32_t sa = c >> 24;
                 if (op != 255u) sa = (sa * op + 127u) / 255u;
                 if (!sa) continue;

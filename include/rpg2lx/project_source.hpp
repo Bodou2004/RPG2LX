@@ -20,9 +20,13 @@ ProjectSourceResult resolve_mv_project(const std::filesystem::path& input);
 // root / rel, matching each component case-insensitively when the exact spelling does not exist.
 // MV games are authored on Windows, where "img/Pictures/Hero.PNG" and "img/pictures/hero.png"
 // are the same file; on the handheld's Linux filesystem they are not.
-// Returns an empty path when `rel` could leave `root` (see is_safe_relative), so no caller can be tricked into it.
+// Returns an empty path when `rel` could leave `root`, by its text (see is_safe_relative) or through a symlink
+// (see path_is_inside), so no caller can be tricked into it.
 std::filesystem::path find_project_file(const std::filesystem::path& root, const std::string& rel);
 // True when `rel` is a relative path with no root, drive or ".." component: joined to a folder it stays inside.
 // A ".." inside a name ("Hero..png") is fine. Pass it already percent-decoded.
 bool is_safe_relative(const std::string& rel);
+// True when `path`, with every symlink resolved, is `root` or inside it. Parts that do not exist yet (a file about
+// to be written) are taken as written.
+bool path_is_inside(const std::filesystem::path& path, const std::filesystem::path& root);
 } // namespace rpg2lx

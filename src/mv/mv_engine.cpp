@@ -14,12 +14,18 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <random>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 extern "C" {
 #include "quickjs.h"
@@ -53,15 +59,37 @@ bool read_utf8_file(const fs::path& path, std::string& out) {
     return true;
 }
 
-bool write_utf8_file(const fs::path& path, const std::string& content) {
+// Writes to a temporary file, flushes it to the card and renames it over `path`. A power cut (a handheld's
+// battery running out mid-save) leaves either the old file or the new one, never a half-written save.
+bool write_file_durable(const fs::path& path, const void* data, std::size_t size) {
     std::error_code ec;
-    if (path.has_parent_path()) {
-        fs::create_directories(path.parent_path(), ec);
-    }
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);
+    fs::path tmp = path;
+    tmp += ".rpg2lx-tmp";
+#ifdef _WIN32
+    FILE* f = _wfopen(tmp.c_str(), L"wb");
+#else
+    FILE* f = std::fopen(tmp.c_str(), "wb");
+#endif
     if (!f) return false;
-    f.write(content.data(), static_cast<std::streamsize>(content.size()));
-    return static_cast<bool>(f);
+    bool ok = size == 0 || std::fwrite(data, 1, size, f) == size;
+    ok = std::fflush(f) == 0 && ok;
+#ifdef _WIN32
+    ok = _commit(_fileno(f)) == 0 && ok;
+#else
+    ok = fsync(fileno(f)) == 0 && ok;
+#endif
+    ok = std::fclose(f) == 0 && ok;
+    if (ok) fs::rename(tmp, path, ec);  // replaces atomically on Linux
+    if (!ok || ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
+
+bool write_utf8_file(const fs::path& path, const std::string& content) {
+    return write_file_durable(path, content.data(), content.size());
 }
 
 std::string js_to_std_string(JSContext* ctx, JSValueConst val) {
@@ -177,6 +205,15 @@ struct MvEngine::Impl {
     // Resolve paths for Node 'fs' shim:
     // Writes ALWAYS go strictly into save_dir; reads check save_dir first, then project_root (read-only).
     bool resolve_fs_path(const std::string& raw, fs::path& out_path, bool for_write) const {
+        if (!resolve_fs_path_text(raw, out_path, for_write)) return false;
+        // The text is safe; a symlink inside saves/ or the game could still lead elsewhere. Writes must land in
+        // saves/; reads may also come from the game.
+        if (out_path.empty()) return false;
+        if (path_is_inside(out_path, save_dir)) return true;
+        return !for_write && path_is_inside(out_path, project_root);
+    }
+
+    bool resolve_fs_path_text(const std::string& raw, fs::path& out_path, bool for_write) const {
         std::string p = raw;
         for (char& c : p) if (c == '\\') c = '/';
         // Plugins build absolute paths from process.mainModule.filename / process.cwd(), which the
@@ -491,12 +528,7 @@ JSValue cb_fs_write_bytes(JSContext* ctx, JSValueConst, int argc, JSValueConst* 
     size_t len = 0;
     const std::uint8_t* data = JS_GetArrayBuffer(ctx, &len, argv[1]);
     if (!data && len) return JS_FALSE;
-    std::error_code ec;
-    if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
-    std::ofstream out(p, std::ios::binary | std::ios::trunc);
-    if (!out) return JS_FALSE;
-    if (len) out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(len));
-    return JS_NewBool(ctx, static_cast<bool>(out));
+    return JS_NewBool(ctx, write_file_durable(p, data, len));
 }
 
 JSValue cb_fs_remove(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -690,7 +722,10 @@ JSValue cb_bmp_radial_fill_rect(JSContext* ctx, JSValueConst, int argc, JSValueC
     NativeBitmap* nb = im->unwrap_bitmap(argv[0]);
     if (!nb) return JS_UNDEFINED;
     double v[8] = {};
-    for (int i = 0; i < 8; ++i) JS_ToFloat64(ctx, &v[i], argv[1 + i]);
+    for (int i = 0; i < 8; ++i) {
+        JS_ToFloat64(ctx, &v[i], argv[1 + i]);
+        if (!std::isfinite(v[i]) || std::abs(v[i]) > 1e7) return JS_UNDEFINED;  // canvas draws nothing either
+    }
     int32_t opacity = 255;
     JS_ToInt32(ctx, &opacity, argv[11]);
     const bool lighter = JS_ToBool(ctx, argv[12]) > 0;

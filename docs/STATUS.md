@@ -1,6 +1,14 @@
 # Estado de RPG2LX
 
-2026-10-31 — versión 0.7.5.
+2026-11-01 — versión 0.7.6.
+
+## Robustez (0.7.6)
+
+- Enlaces simbólicos: `path_is_inside()` (`src/mv/project_source.cpp`) resuelve la ruta real con `weakly_canonical`. `find_project_file()` devuelve una ruta vacía si un enlace dentro del juego lleva fuera, y el shim `fs` solo escribe dentro de `saves/` y solo lee de `saves/` o del juego. Probado en PC con uniones de Windows: leer a través de un enlace da `ENOENT` y escribir da `EACCES`.
+- Guardado a prueba de cortes: cada escritura del shim `fs` (también los `.rpgsave`) va a un archivo temporal, se vuelca a la tarjeta (`fsync`) y se renombra encima del original. Si la batería se agota a mitad, queda el archivo viejo o el nuevo, nunca uno a medias.
+- El relleno de degradado radial nativo ignora centros o radios no finitos (`NaN`); antes podían dar un índice fuera de la tabla de colores.
+- Los cambios propios en QuickJS están también en `third_party/quickjs/rpg2lx-regexp-legacy.patch`, para volver a aplicarlos al actualizar QuickJS.
+- CI: `.github/workflows` en la rama `ci/github-actions` (pendiente de PR), con cuatro jobs que pasan.
 
 ## Luces y seguridad (0.7.5)
 

@@ -1,0 +1,124 @@
+diff --git a/third_party/quickjs/quickjs.c b/third_party/quickjs/quickjs.c
+index 6ca030b..d67dc95 100644
+--- a/third_party/quickjs/quickjs.c
++++ b/third_party/quickjs/quickjs.c
+@@ -582,6 +582,10 @@ struct JSContext {
+     JSValue function_ctor;
+     JSValue array_ctor;
+     JSValue regexp_ctor;
++    /* RPG2LX: result of the last successful RegExp exec, for the legacy
++       RegExp.$1-$9 / lastMatch / input statics that browsers (and RPG Maker
++       plugins) rely on. */
++    JSValue regexp_last_match;
+     JSValue promise_ctor;
+     JSValue native_error_proto[JS_NATIVE_ERROR_COUNT];
+     JSValue error_ctor;
+@@ -2869,6 +2873,7 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
+     ctx->iterator_ctor = JS_NULL;
+     ctx->iterator_ctor_getset = JS_NULL;
+     ctx->regexp_ctor = JS_NULL;
++    ctx->regexp_last_match = JS_UNDEFINED;
+     ctx->promise_ctor = JS_NULL;
+     ctx->error_ctor = JS_NULL;
+     ctx->error_back_trace = JS_UNDEFINED;
+@@ -3013,6 +3018,7 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
+     JS_MarkValue(rt, ctx->promise_ctor, mark_func);
+     JS_MarkValue(rt, ctx->array_ctor, mark_func);
+     JS_MarkValue(rt, ctx->regexp_ctor, mark_func);
++    JS_MarkValue(rt, ctx->regexp_last_match, mark_func);
+     JS_MarkValue(rt, ctx->function_ctor, mark_func);
+     JS_MarkValue(rt, ctx->function_proto, mark_func);
+ 
+@@ -3096,6 +3102,8 @@ void JS_FreeContext(JSContext *ctx)
+     JS_FreeValue(ctx, ctx->promise_ctor);
+     JS_FreeValue(ctx, ctx->array_ctor);
+     JS_FreeValue(ctx, ctx->regexp_ctor);
++    JS_FreeValue(ctx, ctx->regexp_last_match);
++    ctx->regexp_last_match = JS_UNDEFINED;
+     JS_FreeValue(ctx, ctx->function_ctor);
+     JS_FreeValue(ctx, ctx->function_proto);
+ 
+@@ -49926,6 +49934,8 @@ static JSValue js_regexp_exec(JSContext *ctx, JSValueConst this_val,
+                 goto fail;
+             }
+         }
++        JS_FreeValue(ctx, ctx->regexp_last_match);
++        ctx->regexp_last_match = js_dup(obj);
+     }
+     ret = obj;
+     obj = JS_UNDEFINED;
+@@ -50781,9 +50791,74 @@ done:
+     return A;
+ }
+ 
++/* RPG2LX: legacy RegExp statics. magic 1-9: $1-$9, 0: lastMatch,
++   10: input, 11: leftContext, 12: rightContext, 13: lastParen. */
++static JSValue js_regexp_get_legacy(JSContext *ctx, JSValueConst this_val, int magic)
++{
++    JSValue m = ctx->regexp_last_match, v, input;
++    int64_t len, index;
++    JSString *s;
++    if (!JS_IsObject(m))
++        return JS_AtomToString(ctx, JS_ATOM_empty_string);
++    if (magic <= 9 || magic == 13) {
++        uint32_t i = magic;
++        if (magic == 13) {
++            if (js_get_length64(ctx, &len, m))
++                return JS_EXCEPTION;
++            i = len > 1 ? (uint32_t)(len - 1) : 0;
++            if (len <= 1)
++                return JS_AtomToString(ctx, JS_ATOM_empty_string);
++        }
++        v = JS_GetPropertyUint32(ctx, m, i);
++        if (JS_IsUndefined(v))
++            return JS_AtomToString(ctx, JS_ATOM_empty_string);
++        return v;
++    }
++    input = JS_GetProperty(ctx, m, JS_ATOM_input);
++    if (magic == 10 || !JS_IsString(input))
++        return input;
++    v = JS_GetProperty(ctx, m, JS_ATOM_index);
++    if (JS_ToInt64Free(ctx, &index, v)) {
++        JS_FreeValue(ctx, input);
++        return JS_EXCEPTION;
++    }
++    s = JS_VALUE_GET_STRING(input);
++    if (magic == 11) {
++        v = js_sub_string(ctx, s, 0, (int)index);
++    } else {
++        JSValue whole = JS_GetPropertyUint32(ctx, m, 0);
++        int end = (int)index;
++        if (JS_IsString(whole))
++            end += JS_VALUE_GET_STRING(whole)->len;
++        JS_FreeValue(ctx, whole);
++        v = js_sub_string(ctx, s, end, s->len);
++    }
++    JS_FreeValue(ctx, input);
++    return v;
++}
++
+ static const JSCFunctionListEntry js_regexp_funcs[] = {
+     JS_CFUNC_DEF("escape", 1, js_regexp_escape ),
+     JS_CGETSET_DEF("[Symbol.species]", js_get_this, NULL ),
++    JS_CGETSET_MAGIC_DEF("$1", js_regexp_get_legacy, NULL, 1 ),
++    JS_CGETSET_MAGIC_DEF("$2", js_regexp_get_legacy, NULL, 2 ),
++    JS_CGETSET_MAGIC_DEF("$3", js_regexp_get_legacy, NULL, 3 ),
++    JS_CGETSET_MAGIC_DEF("$4", js_regexp_get_legacy, NULL, 4 ),
++    JS_CGETSET_MAGIC_DEF("$5", js_regexp_get_legacy, NULL, 5 ),
++    JS_CGETSET_MAGIC_DEF("$6", js_regexp_get_legacy, NULL, 6 ),
++    JS_CGETSET_MAGIC_DEF("$7", js_regexp_get_legacy, NULL, 7 ),
++    JS_CGETSET_MAGIC_DEF("$8", js_regexp_get_legacy, NULL, 8 ),
++    JS_CGETSET_MAGIC_DEF("$9", js_regexp_get_legacy, NULL, 9 ),
++    JS_CGETSET_MAGIC_DEF("lastMatch", js_regexp_get_legacy, NULL, 0 ),
++    JS_CGETSET_MAGIC_DEF("$&", js_regexp_get_legacy, NULL, 0 ),
++    JS_CGETSET_MAGIC_DEF("input", js_regexp_get_legacy, NULL, 10 ),
++    JS_CGETSET_MAGIC_DEF("$_", js_regexp_get_legacy, NULL, 10 ),
++    JS_CGETSET_MAGIC_DEF("leftContext", js_regexp_get_legacy, NULL, 11 ),
++    JS_CGETSET_MAGIC_DEF("$`", js_regexp_get_legacy, NULL, 11 ),
++    JS_CGETSET_MAGIC_DEF("rightContext", js_regexp_get_legacy, NULL, 12 ),
++    JS_CGETSET_MAGIC_DEF("$'", js_regexp_get_legacy, NULL, 12 ),
++    JS_CGETSET_MAGIC_DEF("lastParen", js_regexp_get_legacy, NULL, 13 ),
++    JS_CGETSET_MAGIC_DEF("$+", js_regexp_get_legacy, NULL, 13 ),
+ };
+ 
+ static const JSCFunctionListEntry js_regexp_proto_funcs[] = {

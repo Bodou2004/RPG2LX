@@ -42,21 +42,39 @@ bool is_safe_relative(const std::string& rel) {
     return true;
 }
 
+bool path_is_inside(const fs::path& path, const fs::path& root) {
+    std::error_code ec;
+    const fs::path real=fs::weakly_canonical(path,ec);
+    if(ec)return false;
+    const fs::path real_root=fs::weakly_canonical(root,ec);
+    if(ec)return false;
+    auto p=real.begin();
+    for(auto r=real_root.begin();r!=real_root.end();++r,++p) {
+        if(r->empty())continue;  // trailing separator
+        if(p==real.end() || *p!=*r)return false;
+    }
+    return true;
+}
+
 fs::path find_project_file(const fs::path& root, const std::string& rel) {
     if(!is_safe_relative(rel)) return {};
-    const fs::path exact=root/fs::u8path(rel);
+    fs::path found=root/fs::u8path(rel);
     std::error_code ec;
-    if(fs::exists(exact,ec))return exact;
-    fs::path current=root;
-    for(const auto& part:fs::u8path(rel)) {
-        const auto name=part.u8string();
-        if(name.empty() || name=="." || name=="/")continue;
-        const auto& names=listing(current);
-        const auto match=names.find(fold(name));
-        if(match==names.end())return exact;
-        current/=fs::u8path(match->second);
+    if(!fs::exists(found,ec)) {
+        fs::path current=root;
+        bool all=true;
+        for(const auto& part:fs::u8path(rel)) {
+            const auto name=part.u8string();
+            if(name.empty() || name=="." || name=="/")continue;
+            const auto& names=listing(current);
+            const auto match=names.find(fold(name));
+            if(match==names.end()) { all=false; break; }
+            current/=fs::u8path(match->second);
+        }
+        if(all)found=current;
     }
-    return current;
+    // A symlink inside the game could still point outside it.
+    return path_is_inside(found,root) ? found : fs::path{};
 }
 ProjectSourceResult resolve_mv_project(const fs::path& input) {
     try {
