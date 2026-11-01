@@ -1,4 +1,5 @@
 #pragma once
+#include "rpg2lx/browser_engine.hpp"
 #include "rpg2lx/controls.hpp"
 #include "rpg2lx/library.hpp"
 #include "rpg2lx/session.hpp"
@@ -11,7 +12,7 @@ enum class MenuAction { Up, Down, Left, Right, Confirm, Back, Refresh, Play, Clo
 enum class HubScreen { Library, GameMenu, Controls };
 
 // Game menu rows, in display order.
-enum class GameMenuItem { Play, GameControls, ResetGameControls, Back, Count };
+enum class GameMenuItem { Play, Engine, GameControls, ResetGameControls, Back, Count };
 inline constexpr std::size_t kGameMenuCount = static_cast<std::size_t>(GameMenuItem::Count);
 // Controls editor: one row per pad button, then "reset to defaults".
 inline constexpr std::size_t kControlsRowCount = kPadButtonCount + 1;
@@ -45,12 +46,16 @@ public:
     struct LaunchRequest {
         std::filesystem::path project;
         std::string id;
+        Engine engine = Engine::Native;
     };
     const std::optional<LaunchRequest>& launch_request() const { return launch_request_; }
 
     HubScreen screen() const { return screen_; }
     std::size_t menu_index() const { return menu_index_; }
     const ControlProfile& controls() const { return controls_; }
+    // Engine of the game whose menu is open (saved per game in config/games/<id>/engine.txt).
+    Engine engine() const { return engine_; }
+    bool browser_available() const { return browser_engine_installed(library_.home()); }
     bool editing_global_controls() const { return controls_game_id_.empty(); }
 
 private:
@@ -76,6 +81,7 @@ private:
     std::size_t menu_index_ = 0;
     ControlProfile controls_ = ControlProfile::defaults();
     std::string controls_game_id_;
+    Engine engine_ = Engine::Native;
 };
 
 int run_launcher(GameLibrary& library, int smoke_frames = 0,

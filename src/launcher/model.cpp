@@ -98,9 +98,14 @@ void LauncherModel::play_selected() {
         if (!hub_mode_) open_project(game->project);
         return;
     }
+    const Engine engine = load_engine(library_.home(), game->id);
+    if (engine == Engine::Browser && (!hub_mode_ || !browser_engine_installed(library_.home()))) {
+        message_ = hub_mode_ ? "Falta NW.js en la carpeta rpg2lx/nwjs/." : "El motor navegador solo funciona desde PortMaster.";
+        return;
+    }
     if (hub_mode_) {
         const auto resolved = resolve_mv_project(game->project);
-        launch_request_ = LaunchRequest{resolved ? resolved.source->root : game->project, game->id};
+        launch_request_ = LaunchRequest{resolved ? resolved.source->root : game->project, game->id, engine};
         quit_ = true;
         return;
     }
@@ -179,7 +184,12 @@ void LauncherModel::act(MenuAction action) {
         else if (action == MenuAction::Down) menu_index_ = (menu_index_ + 1) % kGameMenuCount;
         else if (action == MenuAction::Back) { screen_ = HubScreen::Library; message_.clear(); }
         else if (action == MenuAction::Play) play_selected();
-        else if (action == MenuAction::Confirm) {
+        else if (item == GameMenuItem::Engine &&
+                 (action == MenuAction::Left || action == MenuAction::Right || action == MenuAction::Confirm)) {
+            engine_ = engine_ == Engine::Native ? Engine::Browser : Engine::Native;
+            save_engine(library_.home(), game->id, engine_);
+            message_ = engine_ == Engine::Browser && !browser_available() ? "Falta NW.js en la carpeta rpg2lx/nwjs/." : "";
+        } else if (action == MenuAction::Confirm) {
             switch (item) {
                 case GameMenuItem::Play: play_selected(); break;
                 case GameMenuItem::GameControls: open_controls(game->id); break;
@@ -216,6 +226,7 @@ void LauncherModel::act(MenuAction action) {
     }
     screen_ = HubScreen::GameMenu;
     menu_index_ = 0;
+    engine_ = load_engine(library_.home(), selected()->id);
     message_.clear();
 }
 } // namespace rpg2lx

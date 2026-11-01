@@ -2,9 +2,9 @@
 
 Runtime 1:1 portable para proyectos RPG Maker MV, diseñado para consolas de bolsillo Linux ARM64 (R36S / Rockchip RK3326 y compatibles) y distribución mediante PortMaster.
 
-## Estado (`0.7.6`)
+## Estado (`0.8.0`)
 
-HUB para PortMaster con un motor nativo (QuickJS + SDL2) que ejecuta los `js/rpg_*.js` y los plugins originales del juego, sin modificarlos, como un juego exportado (sin modo de prueba). Incluye una capa de compatibilidad amplia de Canvas 2D, DOM, APIs de navegador y módulos de Node/NW.js con lo que suelen usar los plugins (sin vídeo, filtros de PIXI, workers ni red). El HUB y cada juego corren en procesos separados. Detalle, lo comprobado y lo pendiente en [STATUS.md](docs/STATUS.md).
+HUB para PortMaster con dos motores por juego. El **navegador** (por defecto) es NW.js, el mismo Chromium que usan los juegos de MV en PC: compatibilidad total con los plugins. Ver [ENGINES.md](docs/ENGINES.md). El **nativo** (QuickJS + SDL2) ejecuta los `js/rpg_*.js` y los plugins originales del juego, sin modificarlos, como un juego exportado (sin modo de prueba). Incluye una capa de compatibilidad amplia de Canvas 2D, DOM, APIs de navegador y módulos de Node/NW.js con lo que suelen usar los plugins (sin vídeo, filtros de PIXI, workers ni red). El HUB y cada juego corren en procesos separados. Detalle, lo comprobado y lo pendiente en [STATUS.md](docs/STATUS.md).
 
 ## Controles
 

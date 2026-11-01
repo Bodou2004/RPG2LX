@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(rpg2lx VERSION 0.7.6 LANGUAGES C CXX)
+project(rpg2lx VERSION 0.8.0 LANGUAGES C CXX)
 option(RPG2LX_WITH_SDL "Build the graphical game library menu and SDL2 MV renderer" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -27,6 +27,7 @@ add_library(rpg2lx_core STATIC
     src/launcher/library.cpp
     src/launcher/model.cpp
     src/launcher/controls.cpp
+    src/launcher/browser_engine.cpp
     src/js/js_runtime.cpp
     third_party/quickjs/dtoa.c
     third_party/quickjs/libregexp.c

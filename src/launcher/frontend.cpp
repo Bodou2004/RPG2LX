@@ -130,7 +130,8 @@ bool write_launch_request(const std::filesystem::path& file, const rpg2lx::Launc
     std::filesystem::create_directories(file.parent_path(), ec);
     std::ofstream out(file, std::ios::trunc);
     out << "project=" << request.project.u8string() << '\n'
-        << "id=" << request.id << '\n';
+        << "id=" << request.id << '\n'
+        << "engine=" << (request.engine == rpg2lx::Engine::Browser ? "browser" : "native") << '\n';
     return static_cast<bool>(out);
 }
 } // namespace

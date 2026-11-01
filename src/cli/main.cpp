@@ -1,3 +1,4 @@
+#include "rpg2lx/browser_engine.hpp"
 #include "rpg2lx/core.hpp"
 #include "rpg2lx/map.hpp"
 #include "rpg2lx/launcher.hpp"
@@ -22,15 +23,48 @@ void print_help() {
     std::cout << "  rpg2lx list [--home DIR]      List folders detected in games/\n";
     std::cout << "  rpg2lx run <MV export> [--home DIR] [--game-id ID] Open an existing MV project in place\n";
     std::cout << "  rpg2lx hub --home DIR --request FILE  PortMaster HUB: writes the chosen game and exits 10\n";
+    std::cout << "  rpg2lx browser-app --home DIR --game-id ID --project DIR [--gptk FILE]\n"
+                 "                                 Write the NW.js wrapper app (and gptokeyb map); prints its folder\n";
+}
+
+// browser-app: everything RPG2LX.sh needs to start a game in the browser engine.
+static int browser_app_command(int argc, char* argv[]) {
+    std::filesystem::path home, project, gptk;
+    std::string game_id;
+    for (int i = 2; i + 1 < argc; i += 2) {
+        const std::string arg = argv[i];
+        if (arg == "--home") home = std::filesystem::u8path(argv[i + 1]);
+        else if (arg == "--game-id") game_id = argv[i + 1];
+        else if (arg == "--project") project = std::filesystem::u8path(argv[i + 1]);
+        else if (arg == "--gptk") gptk = std::filesystem::u8path(argv[i + 1]);
+        else {
+            std::cerr << "Invalid browser-app option: " << arg << '\n';
+            return 1;
+        }
+    }
+    if (home.empty() || game_id.empty() || project.empty() || (argc % 2) != 0) {
+        std::cerr << "browser-app requires --home DIR --game-id ID --project DIR\n";
+        return 1;
+    }
+    std::string error;
+    std::filesystem::path app;
+    if (!rpg2lx::write_browser_app(home, game_id, project, app, error) ||
+        (!gptk.empty() && !rpg2lx::write_browser_gptk(home, game_id, gptk, error))) {
+        std::cerr << error << '\n';
+        return 2;
+    }
+    std::cout << app.u8string() << '\n';
+    return 0;
 }
 
 void print_version() {
-    std::cout << "rpg2lx version 0.7.6 (RPG Maker MV HUB + runtime)\n";
+    std::cout << "rpg2lx version 0.8.0 (RPG Maker MV HUB + runtime)\n";
     std::cout << "Target: Linux ARM64 (RK3326 / R36S) & Host Development\n";
 }
 
 static int rpg2lx_main(int argc, char* argv[]) {
     std::string command = argc < 2 ? "launcher" : argv[1];
+    if (command == "browser-app") return browser_app_command(argc, argv);
 
     if (command == "launcher" || command == "list" || command == "run" || command == "hub") {
         try {

@@ -62,6 +62,7 @@ def main():
         'src/launcher/library.cpp',
         'src/launcher/model.cpp',
         'src/launcher/controls.cpp',
+        'src/launcher/browser_engine.cpp',
         'src/launcher/frontend.cpp',
         'src/launcher/library_view.cpp',
         'src/render/map_view.cpp',

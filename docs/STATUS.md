@@ -1,6 +1,15 @@
 # Estado de RPG2LX
 
-2026-11-01 — versión 0.7.6.
+2026-11-01 — versión 0.8.0.
+
+## Motor navegador (0.8.0)
+
+- Vuelve el motor NW.js, ahora por defecto cuando `rpg2lx/nwjs/` está instalado, sin Westonpack y con vuelta automática al nativo si no arranca. Detalle en [ENGINES.md](ENGINES.md).
+- Probado en PC con NW.js v0.119.2 para Windows (la misma versión que la de ARM64), con la app generada por `rpg2lx browser-app`:
+  - SAOR DOMINA: partida nueva, mapa 26, ~60 fps, guardado en `saves/<id>/`.
+  - Fear & Hunger 1.4.1: partida nueva, mapa 72, ~60 fps, guardado. Su único error es el `SyntaxError` de su propio `physical_attack_animation.js`, que también sale en el juego original.
+- Las dependencias de NW.js ARM64 y sus versiones de glibc se comprobaron contra el `SYSTEM` real de ROCKNIX 20260809.
+- **No probado en la consola:** arranque bajo sway, GPU Mali con Chromium, memoria con 1 GB y rendimiento.
 
 ## Robustez (0.7.6)
 

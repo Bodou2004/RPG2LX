@@ -88,6 +88,67 @@ request_value() {
     sed -n "s/^$1=//p" "$REQUEST" | head -n 1
 }
 
+# Browser engine: the game runs in NW.js (Chromium + Node, what MV exports ship with). It draws straight into the
+# firmware's Wayland compositor (sway on ROCKNIX) or X11; no extra runtime is mounted. Returns 3 when NW.js could
+# not start at all, so the caller can fall back to the native engine.
+run_browser() {
+    local project="$1" game_id="$2"
+    local nwdir="$GAMEDIR/nwjs"
+    local blog="$GAMEDIR/logs/browser.log"
+    if [ ! -f "$nwdir/nw" ]; then
+        echo "Browser engine: NW.js is not installed in $nwdir"
+        return 3
+    fi
+    # Copying to the SD from Windows drops exec bits.
+    while read -r exe; do
+        [ -n "$exe" ] && chmod +x "$nwdir/$exe" 2>/dev/null
+    done < "$nwdir/EXECUTABLES.txt"
+
+    local gptk="$CONFDIR/games/$game_id/browser.gptk"
+    local app
+    app="$("$BIN" browser-app --home "$GAMEDIR" --game-id "$game_id" --project "$project" --gptk "$gptk")" || return 3
+
+    # The compositor's variables, when the port was started without them.
+    if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ] && [ -f /etc/profile ]; then
+        . /etc/profile >/dev/null 2>&1
+    fi
+    local runtime="${XDG_RUNTIME_DIR:-/var/run/0-runtime-dir}"
+    local platform
+    if [ -n "$WAYLAND_DISPLAY" ] || [ -S "$runtime/wayland-1" ] || [ -S "$runtime/wayland-0" ]; then
+        export XDG_RUNTIME_DIR="$runtime"
+        if [ -z "$WAYLAND_DISPLAY" ]; then
+            [ -S "$runtime/wayland-1" ] && export WAYLAND_DISPLAY=wayland-1 || export WAYLAND_DISPLAY=wayland-0
+        fi
+        platform="--ozone-platform=wayland"
+    elif [ -n "$DISPLAY" ]; then
+        platform="--ozone-platform=x11"
+    else
+        echo "Browser engine: no Wayland or X11 display found"
+        return 3
+    fi
+    # ROCKNIX runs ports as root, where Chromium refuses to start with its sandbox on.
+    local sandbox=""
+    [ "$(id -u)" = "0" ] && sandbox="--no-sandbox"
+
+    echo "=== $(date) | $game_id | $platform WAYLAND_DISPLAY=$WAYLAND_DISPLAY DISPLAY=$DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$blog"
+    $GPTOKEYB "nw" -c "$gptk" &
+    command -v portmaster_sway_fullscreen.sh >/dev/null 2>&1 && portmaster_sway_fullscreen.sh nw >/dev/null 2>&1 &
+
+    local started=$SECONDS
+    # nwjs/syslibs carries the NSS libraries the firmware lacks; everything else comes from the system.
+    RPG2LX_BROWSER_LOG="$blog" RPG2LX_SAVE_DIR="$GAMEDIR/saves/$game_id" \
+    LD_LIBRARY_PATH="$nwdir/lib:$nwdir/syslibs:$LD_LIBRARY_PATH" \
+        "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox "$app" >> "$blog" 2>&1
+    local status=$?
+    pm_gptokeyb_finish 2>/dev/null || $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
+    echo "=== NW.js exited with $status after $((SECONDS - started)) s" >> "$blog"
+    # A crash within a few seconds is a start failure (missing library, no display), not the player quitting.
+    if [ "$status" -ne 0 ] && [ $((SECONDS - started)) -lt 8 ]; then
+        return 3
+    fi
+    return "$status"
+}
+
 STATUS=0
 while true; do
     rm -f "$REQUEST"
@@ -99,10 +160,19 @@ while true; do
     fi
     project="$(request_value project)"
     game_id="$(request_value id)"
-    echo "--- Launch: $game_id $(date) ---"
+    engine="$(request_value engine)"
+    echo "--- Launch: $game_id (${engine:-native}) $(date) ---"
     set_performance_governor
-    "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"
-    GAME_STATUS=$?
+    GAME_STATUS=3
+    if [ "$engine" = "browser" ]; then
+        run_browser "$project" "$game_id"
+        GAME_STATUS=$?
+        [ "$GAME_STATUS" -eq 3 ] && echo "Browser engine could not start (see logs/browser.log); using the native engine"
+    fi
+    if [ "$GAME_STATUS" -eq 3 ]; then
+        "$BIN" run "$project" --home "$GAMEDIR" --game-id "$game_id"
+        GAME_STATUS=$?
+    fi
     restore_governor
     echo "--- Game ended: $game_id status $GAME_STATUS ---"
 done

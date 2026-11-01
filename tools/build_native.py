@@ -70,6 +70,7 @@ def main():
         "src/launcher/library.cpp",
         "src/launcher/model.cpp",
         "src/launcher/controls.cpp",
+        "src/launcher/browser_engine.cpp",
         "src/js/js_runtime.cpp",
         "src/render/font_renderer.cpp",
         *c_objs,

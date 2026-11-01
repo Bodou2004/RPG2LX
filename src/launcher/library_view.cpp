@@ -483,6 +483,7 @@ struct LibraryView::Impl {
         draw_panel(x, y, w, h, game.title);
         const std::array<std::pair<std::string, std::string>, kGameMenuCount> rows{{
             {"Jugar", ""},
+            {"Motor", std::string("< ") + engine_label(model.engine()) + " >"},
             {"Controles de este juego", ""},
             {"Usar controles globales", ""},
             {"Volver", ""},
