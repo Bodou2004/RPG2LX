@@ -88,6 +88,57 @@ request_value() {
     sed -n "s/^$1=//p" "$REQUEST" | head -n 1
 }
 
+# Prints the Chromium GPU switches that give WebGL a real GPU on this firmware. The first time, each candidate is
+# tried with a tiny NW.js page that reports its WebGL renderer; the winner (or "none", for CPU rendering) is kept
+# in config/browser-gpu.txt. Delete that file to probe again.
+browser_gpu_flags() {
+    local nwdir="$1" platform="$2" sandbox="$3"
+    local cache="$CONFDIR/browser-gpu.txt"
+    if [ -f "$cache" ]; then
+        local saved
+        saved="$(head -n 1 "$cache")"
+        [ "$saved" != "none" ] && printf '%s' "$saved"
+        return
+    fi
+    local probe="/tmp/rpg2lx-nw/probe" out="/tmp/rpg2lx-nw/probe.txt"
+    mkdir -p "$probe/app"
+    cat > "$probe/app/package.json" <<'EOF'
+{ "name": "rpg2lx-gpu-probe", "main": "probe.html", "window": { "show": false } }
+EOF
+    cat > "$probe/app/probe.html" <<'EOF'
+<!doctype html><script>
+var r = "no-webgl";
+try {
+  var gl = document.createElement("canvas").getContext("webgl");
+  if (gl) {
+    var e = gl.getExtension("WEBGL_debug_renderer_info");
+    r = String(gl.getParameter(e ? e.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+  }
+} catch (err) { r = "error " + err; }
+require("fs").writeFileSync(process.env.RPG2LX_GPU_PROBE, r);
+nw.App.quit();
+</script>
+EOF
+    local candidate renderer
+    for candidate in "" "--use-angle=gles" "--use-gl=angle --use-angle=gles-egl" "--use-gl=egl"; do
+        rm -rf "$out" "$probe/profile"
+        RPG2LX_GPU_PROBE="$out" LD_LIBRARY_PATH="$nwdir/lib:$nwdir/syslibs:$LD_LIBRARY_PATH" \
+            timeout 20 "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox --ignore-gpu-blocklist $candidate \
+            "--user-data-dir=$probe/profile" "$probe/app" >/dev/null 2>&1
+        renderer="$(cat "$out" 2>/dev/null)"
+        echo "=== GPU probe [${candidate:-default}]: ${renderer:-no answer}" >> "$GAMEDIR/logs/browser.log"
+        case "$renderer" in
+            ""|no-webgl|error*|*SwiftShader*|*llvmpipe*|*softpipe*) ;;
+            *)
+                printf '%s\n%s\n' "${candidate:---ignore-gpu-blocklist}" "$renderer" > "$cache"
+                printf '%s' "${candidate:---ignore-gpu-blocklist}"
+                return
+                ;;
+        esac
+    done
+    echo none > "$cache"
+}
+
 # Browser engine: the game runs in NW.js (Chromium + Node, what MV exports ship with). It draws straight into the
 # firmware's Wayland compositor (sway on ROCKNIX) or X11; no extra runtime is mounted. Returns 3 when NW.js could
 # not start at all, so the caller can fall back to the native engine.
@@ -140,11 +191,16 @@ run_browser() {
     mkdir -p "$profile"
     rm -f "$profile/SingletonLock" "$profile/SingletonSocket" "$profile/SingletonCookie"
 
+    unset DBUS_SESSION_BUS_ADDRESS
+    local gpu_flags
+    gpu_flags="$(browser_gpu_flags "$nwdir" "$platform" "$sandbox")"
+    echo "=== GPU flags: ${gpu_flags:-(none: CPU rendering)}" >> "$blog"
+
     local started=$SECONDS
     # nwjs/syslibs carries the NSS libraries the firmware lacks; everything else comes from the system.
     RPG2LX_BROWSER_LOG="$blog" RPG2LX_SAVE_DIR="$GAMEDIR/saves/$game_id" \
     LD_LIBRARY_PATH="$nwdir/lib:$nwdir/syslibs:$LD_LIBRARY_PATH" \
-        "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox "--user-data-dir=$profile" "$app" >> "$blog" 2>&1
+        "$nwdir/nw" $platform $sandbox --disable-gpu-sandbox $gpu_flags "--user-data-dir=$profile" "$app" >> "$blog" 2>&1
     local status=$?
     pm_gptokeyb_finish 2>/dev/null || $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
     echo "=== NW.js exited with $status after $((SECONDS - started)) s" >> "$blog"
