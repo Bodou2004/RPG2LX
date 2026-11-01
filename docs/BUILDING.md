@@ -33,4 +33,6 @@ python tests/test_cli_native.py build/native-debug/rpg2lx.exe
 
 ## Alcance
 
-Una build Windows verifica el núcleo y, con SDL, renderizado automatizado; no demuestra controles/rendimiento físicos. La build ARM64 y empaquetado están en tools/build_arm64.py y tools/package_sd.py; ver SD_PACKAGE.md. El usuario probó la versión anterior en consola; la nueva 0.3 necesita prueba física. No usar el antiguo prototipo tools/rpg2lx_ref.py para certificar cambios C++.
+Una build Windows verifica el núcleo y, con SDL, renderizado automatizado; no demuestra controles/rendimiento físicos. La build ARM64 y empaquetado están en tools/build_arm64.py y tools/package_sd.py; ver SD_PACKAGE.md. Qué está probado en la consola y qué no lo dice [STATUS.md](STATUS.md). No usar el antiguo prototipo tools/rpg2lx_ref.py para certificar cambios C++.
+
+`tests/mv_probe.cpp` (se compila pero la suite no lo ejecuta) maneja un juego real desde un guion para medir y depurar: `mv_probe <proyecto> <carpeta_salida> <guion>`. Variables: `RPG2LX_PROBE_GPU` (renderizador acelerado), `RPG2LX_ASYNC_IMAGES` (carga de imágenes asíncrona), `RPG2LX_UPDATES=N` (actualizaciones por frame) y `RPG2LX_SLOW_MS=N` (muestra los frames más lentos que N ms).

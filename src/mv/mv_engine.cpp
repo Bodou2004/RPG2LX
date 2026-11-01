@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <random>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
@@ -178,7 +179,6 @@ struct MvEngine::Impl {
     bool resolve_fs_path(const std::string& raw, fs::path& out_path, bool for_write) const {
         std::string p = raw;
         for (char& c : p) if (c == '\\') c = '/';
-        if (p.find("..") != std::string::npos) return false;
         // Plugins build absolute paths from process.mainModule.filename / process.cwd(), which the
         // JS shim reports as the virtual "/game" directory (optionally as a file:// URL).
         if (p.rfind("file://", 0) == 0) p.erase(0, 7);
@@ -187,7 +187,9 @@ struct MvEngine::Impl {
 
         static constexpr const char* kSavePrefix = "/__rpg2lx_saves__/";
         if (p.rfind(kSavePrefix, 0) == 0) {
-            const std::string sub = p.substr(std::strlen(kSavePrefix));
+            std::string sub = p.substr(std::strlen(kSavePrefix));
+            for (char& c : sub) if (c == '\\') c = '/';
+            if (!is_safe_relative(sub)) return false;
             if (sub.empty()) {
                 out_path = save_dir;
                 return true;
@@ -208,7 +210,10 @@ struct MvEngine::Impl {
             return true;
         }
 
-        const std::string rel = url_decode_rel(p);
+        // Checked after decoding: "%2e%2e/" must not get through as "../".
+        std::string rel = url_decode_rel(p);
+        for (char& c : rel) if (c == '\\') c = '/';
+        if (!is_safe_relative(rel)) return false;
         if (for_write) {
             if (rel.empty()) return false;
             out_path = save_dir / fs::u8path(rel);
@@ -249,7 +254,7 @@ struct MvEngine::Impl {
 
     bool eval_project_script(const std::string& rel_url, std::string& error) {
         const std::string rel = url_decode_rel(rel_url);
-        if (rel.empty() || rel.find("..") != std::string::npos) {
+        if (rel.empty() || !is_safe_relative(rel)) {
             error = "Invalid script path: " + rel_url;
             return false;
         }
@@ -305,6 +310,15 @@ JSValue cb_hr_now_ms(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     return JS_NewFloat64(ctx, std::chrono::duration<double, std::milli>(
                                   std::chrono::steady_clock::now().time_since_epoch()).count());
 }
+
+// Bytes in use by the JS heap, for leak checks.
+JSValue cb_mem_usage(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    JSMemoryUsage mu{};
+    JS_ComputeMemoryUsage(JS_GetRuntime(ctx), &mu);
+    return JS_NewFloat64(ctx, static_cast<double>(mu.memory_used_size));
+}
+
+JSValue cb_image_cache_bytes(JSContext* ctx, JSValueConst, int, JSValueConst*);
 
 JSValue cb_now_ms(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     auto* im = get_impl(ctx);
@@ -372,7 +386,7 @@ JSValue cb_read_project_text(JSContext* ctx, JSValueConst, int argc, JSValueCons
     auto* im = get_impl(ctx);
     if (!im || argc < 1) return JS_NULL;
     const std::string rel = url_decode_rel(js_to_std_string(ctx, argv[0]));
-    if (rel.empty() || rel.find("..") != std::string::npos) return JS_NULL;
+    if (rel.empty() || !is_safe_relative(rel)) return JS_NULL;
     std::string txt;
     if (!read_utf8_file(find_project_file(im->project_root, rel), txt)) return JS_NULL;
     return JS_NewStringLen(ctx, txt.data(), txt.size());
@@ -382,7 +396,7 @@ JSValue cb_read_project_bytes(JSContext* ctx, JSValueConst, int argc, JSValueCon
     auto* im = get_impl(ctx);
     if (!im || argc < 1) return JS_NULL;
     const std::string rel = url_decode_rel(js_to_std_string(ctx, argv[0]));
-    if (rel.empty() || rel.find("..") != std::string::npos) return JS_NULL;
+    if (rel.empty() || !is_safe_relative(rel)) return JS_NULL;
     std::vector<std::uint8_t> bytes;
     if (!read_binary_file(find_project_file(im->project_root, rel), bytes)) return JS_NULL;
     return JS_NewArrayBufferCopy(ctx, bytes.data(), bytes.size());
@@ -392,7 +406,7 @@ JSValue cb_save_read(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)
     auto* im = get_impl(ctx);
     if (!im || argc < 1) return JS_NULL;
     const std::string name = url_decode_rel(js_to_std_string(ctx, argv[0]));
-    if (name.empty() || name.find("..") != std::string::npos) return JS_NULL;
+    if (name.empty() || !is_safe_relative(name)) return JS_NULL;
     std::string txt;
     if (!read_utf8_file(im->save_dir / fs::u8path(name), txt)) return JS_NULL;
     return JS_NewStringLen(ctx, txt.data(), txt.size());
@@ -402,7 +416,7 @@ JSValue cb_save_write(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv
     auto* im = get_impl(ctx);
     if (!im || argc < 2) return JS_FALSE;
     const std::string name = url_decode_rel(js_to_std_string(ctx, argv[0]));
-    if (name.empty() || name.find("..") != std::string::npos) return JS_FALSE;
+    if (name.empty() || !is_safe_relative(name)) return JS_FALSE;
     const std::string data = js_to_std_string(ctx, argv[1]);
     return JS_NewBool(ctx, write_utf8_file(im->save_dir / fs::u8path(name), data));
 }
@@ -452,6 +466,37 @@ JSValue cb_fs_write_text(JSContext* ctx, JSValueConst, int argc, JSValueConst* a
     fs::path p;
     if (!im->resolve_fs_path(js_to_std_string(ctx, argv[0]), p, true)) return JS_FALSE;
     return JS_NewBool(ctx, write_utf8_file(p, js_to_std_string(ctx, argv[1])));
+}
+
+// randomBytes(n): n bytes from the OS random source (std::random_device is /dev/urandom on Linux).
+JSValue cb_random_bytes(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    int32_t n = 0;
+    if (argc > 0) JS_ToInt32(ctx, &n, argv[0]);
+    n = std::clamp(n, 0, 65536);  // the Web Crypto limit
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(n));
+    static std::random_device rd;
+    for (int32_t i = 0; i < n; i += 4) {
+        const unsigned v = rd();
+        for (int32_t k = 0; k < 4 && i + k < n; ++k) bytes[static_cast<std::size_t>(i + k)] = static_cast<std::uint8_t>(v >> (8 * k));
+    }
+    return JS_NewArrayBufferCopy(ctx, bytes.data(), bytes.size());
+}
+
+// fsWriteBytes(path, ArrayBuffer): binary counterpart of fsWriteText.
+JSValue cb_fs_write_bytes(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* im = get_impl(ctx);
+    if (!im || argc < 2) return JS_FALSE;
+    fs::path p;
+    if (!im->resolve_fs_path(js_to_std_string(ctx, argv[0]), p, true)) return JS_FALSE;
+    size_t len = 0;
+    const std::uint8_t* data = JS_GetArrayBuffer(ctx, &len, argv[1]);
+    if (!data && len) return JS_FALSE;
+    std::error_code ec;
+    if (p.has_parent_path()) fs::create_directories(p.parent_path(), ec);
+    std::ofstream out(p, std::ios::binary | std::ios::trunc);
+    if (!out) return JS_FALSE;
+    if (len) out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(len));
+    return JS_NewBool(ctx, static_cast<bool>(out));
 }
 
 JSValue cb_fs_remove(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -507,6 +552,20 @@ void cache_decoded_image(MvEngine::Impl* im, const std::string& key, const std::
         }
     }
     im->image_cache.emplace(key, decoded);
+}
+
+// "images bytes inUse": decoded images kept by the cache, their pixel bytes, and how many bitmaps still use them.
+JSValue cb_image_cache_bytes(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    auto* im = get_impl(ctx);
+    double bytes = 0;
+    int in_use = 0;
+    for (const auto& kv : im->image_cache) {
+        bytes += static_cast<double>(kv.second->pixels.size()) * 4.0;
+        if (kv.second.use_count() > 1) ++in_use;
+    }
+    const std::string s = std::to_string(im->image_cache.size()) + " " + std::to_string(bytes / 1048576.0) + "MB " +
+                          std::to_string(in_use);
+    return JS_NewString(ctx, s.c_str());
 }
 
 JSValue cb_bmp_load_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -621,6 +680,55 @@ JSValue cb_bmp_fill_rect(JSContext* ctx, JSValueConst, int argc, JSValueConst* a
         nb->fill_rect(static_cast<int>(std::round(x)), static_cast<int>(std::round(y)),
                       static_cast<int>(std::round(w)), static_cast<int>(std::round(h)), col, op, comp);
     }
+    return JS_UNDEFINED;
+}
+
+// bmpRadialFillRect(ref, x, y, w, h, cx, cy, r0, r1, offsets[], colors[], opacity, lighter)
+JSValue cb_bmp_radial_fill_rect(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* im = get_impl(ctx);
+    if (!im || argc < 13) return JS_UNDEFINED;
+    NativeBitmap* nb = im->unwrap_bitmap(argv[0]);
+    if (!nb) return JS_UNDEFINED;
+    double v[8] = {};
+    for (int i = 0; i < 8; ++i) JS_ToFloat64(ctx, &v[i], argv[1 + i]);
+    int32_t opacity = 255;
+    JS_ToInt32(ctx, &opacity, argv[11]);
+    const bool lighter = JS_ToBool(ctx, argv[12]) > 0;
+
+    // Colour stops, sorted by offset, then sampled into 256 steps.
+    std::vector<std::pair<double, RgbaColor>> stops;
+    JSValue len_v = JS_GetPropertyStr(ctx, argv[9], "length");
+    int32_t n = 0;
+    JS_ToInt32(ctx, &n, len_v);
+    JS_FreeValue(ctx, len_v);
+    for (int32_t i = 0; i < n; ++i) {
+        JSValue o = JS_GetPropertyUint32(ctx, argv[9], static_cast<uint32_t>(i));
+        JSValue c = JS_GetPropertyUint32(ctx, argv[10], static_cast<uint32_t>(i));
+        double off = 0;
+        JS_ToFloat64(ctx, &off, o);
+        stops.emplace_back(std::clamp(off, 0.0, 1.0), parse_css_color(js_to_std_string(ctx, c)));
+        JS_FreeValue(ctx, o);
+        JS_FreeValue(ctx, c);
+    }
+    if (stops.empty()) return JS_UNDEFINED;
+    std::stable_sort(stops.begin(), stops.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::uint32_t lut[256];
+    std::size_t s = 0;
+    for (int i = 0; i < 256; ++i) {
+        const double t = i / 255.0;
+        while (s + 1 < stops.size() && stops[s + 1].first <= t) ++s;
+        const auto& a = stops[s];
+        const auto& b = (s + 1 < stops.size()) ? stops[s + 1] : stops[s];
+        const double span = b.first - a.first;
+        const double f = (t <= a.first || span <= 0) ? 0.0 : std::min(1.0, (t - a.first) / span);
+        const auto mix = [f](int x, int y) { return static_cast<std::uint32_t>(std::lround(x + (y - x) * f)); };
+        lut[i] = pack_px(mix(a.second.r, b.second.r), mix(a.second.g, b.second.g), mix(a.second.b, b.second.b),
+                         mix(a.second.a, b.second.a));
+    }
+    nb->radial_fill_rect(static_cast<int>(std::floor(v[0])), static_cast<int>(std::floor(v[1])),
+                         static_cast<int>(std::ceil(v[0] + v[2])) - static_cast<int>(std::floor(v[0])),
+                         static_cast<int>(std::ceil(v[1] + v[3])) - static_cast<int>(std::floor(v[1])),
+                         v[4], v[5], v[6], v[7], lut, opacity, lighter);
     return JS_UNDEFINED;
 }
 
@@ -1228,6 +1336,9 @@ struct BridgeFunc {
 const BridgeFunc kRpg2lxFuncs[] = {
     {"nowMs", 0, cb_now_ms},
     {"hrNowMs", 0, cb_hr_now_ms},
+    {"jsHeapBytes", 0, cb_mem_usage},
+    {"bmpRadialFillRect", 13, cb_bmp_radial_fill_rect},
+    {"imageCacheInfo", 0, cb_image_cache_bytes},
     {"log", 2, cb_log},
     {"reportError", 1, cb_report_error},
     {"requestExit", 0, cb_request_exit},
@@ -1242,6 +1353,8 @@ const BridgeFunc kRpg2lxFuncs[] = {
     {"fsReadText", 1, cb_fs_read_text},
     {"fsReadBytes", 1, cb_fs_read_bytes},
     {"fsWriteText", 2, cb_fs_write_text},
+    {"fsWriteBytes", 2, cb_fs_write_bytes},
+    {"randomBytes", 1, cb_random_bytes},
     {"fsRemove", 1, cb_fs_remove},
     {"fsReaddir", 1, cb_fs_readdir},
     {"fsIsDir", 1, cb_fs_is_dir},

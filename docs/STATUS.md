@@ -1,6 +1,32 @@
 # Estado de RPG2LX
 
-2026-10-31 — versión 0.7.2.
+2026-10-31 — versión 0.7.5.
+
+## Luces y seguridad (0.7.5)
+
+- `fillRect` con un degradado radial concéntrico (el que dibujan los plugins de luces como TerraxLighting cada frame) tiene una ruta nativa propia en vez de `canvas_ity`. Interpola los colores en RGB sin premultiplicar, como dice el estándar de Canvas y hace NW.js (`canvas_ity` lo hace en espacio lineal). Fear & Hunger, selección de personaje, en PC: de ~16 ms a ~4,4 ms por frame.
+- Seguridad del shim `fs`: la ruta se comprobaba antes de decodificarla, y `%2e%2e/` podía salir de `saves/`. Ahora se decodifica primero y se rechaza cualquier componente `..`, raíz o unidad. Un nombre como `Hero..png` sigue siendo válido.
+- La comprobación vive en un solo sitio, `is_safe_relative()` (`src/mv/project_source.cpp`), y `find_project_file()` la aplica siempre: devuelve una ruta vacía para cualquier ruta que salga del juego, aunque quien la llame olvide comprobarla. Sustituye a las búsquedas de la cadena `".."`, que también rechazaban nombres legítimos.
+- `fs.writeFileSync` escribe bytes reales para `ArrayBuffer`, arrays tipados, `DataView` y `Buffer` (antes los convertía a texto, `1,2,3`), acepta `'base64'` y lanza `EACCES` si no puede escribir. `readFileSync` sin codificación devuelve un `Buffer`, como Node. `appendFileSync` y `copyFileSync` funcionan con binarios.
+- `crypto.getRandomValues` y `randomUUID` usan la fuente aleatoria del sistema en vez de `Math.random`.
+- Documentación al día: `port.json` ya no promete soporte "completo" de DOM y Node, `THIRD_PARTY.md` lista todas las dependencias y esta sección separa las pruebas automáticas de las manuales.
+
+## Compatibilidad (0.7.4)
+
+- `RegExp.$1`–`$9`, `lastMatch`, `input`, `leftContext`, `rightContext` y `lastParen` implementados dentro de QuickJS (`third_party/quickjs/quickjs.c`, marcado `RPG2LX`). Los usan casi todos los plugins que leen notetags (Yanfly y otros); sin ellos Fear & Hunger se caía al empezar.
+- `require` de `greenworks` (Steam) devuelve un Steam que no está en marcha en vez de fallar.
+- Nombres antiguos de PIXI que pixi.js v4 sigue aceptando: `DisplayObjectContainer`, `SpriteBatch`, `AbstractFilter`, `TilingSprite`, `MovieClip`, `BitmapText`.
+- El bucle se limita siempre a 60 FPS. En la K36 con ROCKNIX el vsync no limitaba (80 FPS) y los juegos iban un 33 % más rápido.
+- Comprobado en PC: Fear & Hunger 1.4.1 llega al título, la selección de personaje, la introducción y la pantalla de nombre.
+
+## Menús y memoria (0.7.3)
+
+- Abrir el menú ya no lee la pantalla de vuelta a la CPU: la captura de fondo que hace MV se queda en la GPU y su desenfoque también se hace allí (reducir a la mitad y volver a ampliar con filtro lineal). Solo se lee a la CPU si el juego toca sus píxeles.
+- El fondo y el marco de cada ventana se guardan por windowskin, tamaño y tono, y se copian en vez de dibujarse otra vez desde la skin cada vez que una escena crea sus ventanas.
+- El blit escalado y la mezcla de píxeles ya no hacen divisiones por píxel.
+- Medido en PC (GPU): abrir el menú del proyecto base pasó de ~44 ms a menos de 20 ms; el primer menú de SAOR DOMINA, de ~170 ms a ~37 ms.
+- Las imágenes que el juego solo dibuja como sprites liberan su copia en CPU una vez subidas a la GPU; si luego el juego lee sus píxeles, se decodifican otra vez del archivo.
+- Fugas: 150 aperturas de menú en SAOR DOMINA no hacen crecer la memoria (el heap JS se queda en ~20 MB). SAOR DOMINA precarga 142 imágenes (~110 MB decodificados) y las mantiene todas.
 
 ## Rendimiento (0.7.2)
 
@@ -47,13 +73,28 @@
 
 Por defecto cada botón envía una acción de MV ([Aceptar], [Cancelar], [Menú], [Correr], páginas, direcciones). El motor pulsa la tecla que el `Input.keyMapper` del juego tenga asignada a esa acción. También se puede asignar cualquier tecla concreta: letras, números, F1–F12, Enter, flechas…
 
-## Qué está comprobado (PC, Windows)
+## Qué está comprobado
 
-- Toda la suite de `tools/build_native.py --release`. Incluye la prueba completa contra la plantilla `NewData` de Steam (logo, título, mapa, mensaje, menú, guardado, batalla), el teclado vía `keyMapper` y una prueba de píxeles del Canvas 2D.
-- SAOR DOMINA (`Games/Project1/SAOR-DOMINA-PLUGIN-TEST`, 21 plugins activos) sin modificar: arranca, título MOG, nueva partida, mapa con su HUD y movimiento. Corrió 1037 frames sin errores, a una media de 7,7 ms por frame en PC (`tests/mv_probe.cpp`).
+### Pruebas automáticas (`tools/build_native.py --release`, Windows)
+
+- Pruebas unitarias del núcleo (JSON, mapas, inspector, biblioteca, sesión, estado de juego, runtime JS) y pruebas de la CLI.
+- Prueba de humo del HUB y del motor MV contra `fixtures/playable_project`, que está en el repositorio.
+- Prueba completa contra la plantilla `NewData` de RPG Maker MV (logo, título, mapa, mensaje, menú, guardado, batalla, teclado vía `keyMapper`, píxeles del Canvas 2D). **Solo corre si RPG Maker MV está instalado desde Steam**; si no, se salta y lo avisa.
+- No hay CI: estas pruebas solo corren cuando alguien ejecuta el script.
+
+### Pruebas manuales con juegos reales (PC, `tests/mv_probe.cpp`, no automatizadas)
+
+- SAOR DOMINA (21 plugins activos), sin modificar: arranca, título MOG, nueva partida, mapa con su HUD, movimiento, menú.
+- Fear & Hunger 1.4.1: título, selección de personaje, introducción, pantalla de nombre.
+- `fs` del shim de Node: escritura binaria, base64, `appendFileSync`/`copyFileSync` y rechazo de rutas que salen de `saves/`.
+
+### En la consola (K36, RK3326, ROCKNIX)
+
+- La probó el usuario. Las líneas `perf:` de `logs/launcher.log` dieron, en SAOR DOMINA, entre el 53 % y el 96 % de la velocidad real en los tramos de mapa (antes de 0.7.4 algunos tramos salían por encima del 100 % porque el vsync no limitaba).
 
 ## Qué no está comprobado
 
-- Rendimiento y controles en la consola.
+- Fear & Hunger y los cambios desde 0.7.4 en la consola.
+- Controles en la consola más allá del uso normal del usuario.
 - En la prueba de Domina aparecen un cuadrado magenta y rectángulos negros sin comparar contra NW.js: pueden ser del juego o del motor.
 - Filtros de PIXI (se ignoran), vídeo (`.webm` se salta) y las APIs de PIXI más allá de las que usa MV.

@@ -228,8 +228,29 @@ public:
         if (!renderer_ || !target_bmp || width <= 0 || height <= 0) return;
 
         SDL_Texture* prev_target = SDL_GetRenderTarget(renderer_);
-        ensure_rt(snap_rt_, snap_w_, snap_h_, width, height);
 
+        // The snapshot stays on the GPU as the bitmap's content; pixels are only read back if the game asks.
+        if (supports_rt_) {
+            const char* old_hint = SDL_GetHint(SDL_HINT_RENDER_SCALE_QUALITY);
+            const std::string restore = old_hint ? old_hint : "nearest";
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");  // the GPU blur samples it scaled
+            SDL_Texture* rt = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                                width, height);
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, restore.c_str());
+            if (rt && SDL_SetRenderTarget(renderer_, rt) == 0) {
+                SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+                SDL_RenderClear(renderer_);
+                render_stage(ctx, stage, width, height);
+                SDL_SetRenderTarget(renderer_, prev_target);
+                target_bmp->resize(width, height);
+                SDL_SetTextureBlendMode(rt, SDL_BLENDMODE_BLEND);
+                target_bmp->set_gpu_content(renderer_, rt);
+                return;
+            }
+            if (rt) SDL_DestroyTexture(rt);
+        }
+
+        ensure_rt(snap_rt_, snap_w_, snap_h_, width, height);
         if (snap_rt_) {
             if (SDL_SetRenderTarget(renderer_, snap_rt_) == 0) {
                 render_stage(ctx, stage, width, height);

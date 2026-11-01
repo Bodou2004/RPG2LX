@@ -219,8 +219,14 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
             var ab = __rpg2lx.fsReadBytes(String(p));
             return ab ? new Uint8Array(ab) : null;
         },
+        // Binary data (ArrayBuffer, typed arrays, DataView, Buffer) is written as bytes; anything else as text.
         writeFileSync: function(p, data) {
-            __rpg2lx.fsWriteText(String(p), typeof data === 'string' ? data : String(data));
+            var ok;
+            if (data instanceof ArrayBuffer) ok = __rpg2lx.fsWriteBytes(String(p), data);
+            else if (data && ArrayBuffer.isView(data))
+                ok = __rpg2lx.fsWriteBytes(String(p), data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+            else ok = __rpg2lx.fsWriteText(String(p), typeof data === 'string' ? data : String(data));
+            if (!ok) { var e = new Error("EACCES: permission denied, open '" + p + "'"); e.code = 'EACCES'; throw e; }
         },
         unlinkSync: function(p) { __rpg2lx.fsRemove(String(p)); },
         readdirSync: function(p) { return __rpg2lx.fsReaddir(String(p)); },
@@ -705,6 +711,20 @@ inline constexpr const char* kMvPreCoreBootstrapJs = R"JS(
                     if (w < 0) { x += w; w = -w; }
                     if (h < 0) { y += h; h = -h; }
                     __rpg2lx.bmpFillRect(canvas._nbmpRef, x + this._m[4], y + this._m[5], w, h, fs, this._opacity(), String(this.globalCompositeOperation));
+                    return;
+                }
+                // Concentric radial gradients (lights) have their own native fill: canvas_ity is far too slow for
+                // the dozens a lighting plugin redraws every frame.
+                var op = this.globalCompositeOperation;
+                if (fs instanceof CanvasGradient && fs.__kind === 'radial' && fs.x0 === fs.x1 && fs.y0 === fs.y1 &&
+                    fs.r0 >= 0 && fs.r1 > fs.r0 && fs.stops.length && (op === 'source-over' || op === 'lighter') &&
+                    this._simple()) {
+                    if (w < 0) { x += w; w = -w; }
+                    if (h < 0) { y += h; h = -h; }
+                    var tx = this._m[4], ty = this._m[5], offs = [], cols = [];
+                    for (var si = 0; si < fs.stops.length; si++) { offs.push(fs.stops[si].offset); cols.push(fs.stops[si].color); }
+                    __rpg2lx.bmpRadialFillRect(canvas._nbmpRef, x + tx, y + ty, w, h, fs.x0 + tx, fs.y0 + ty, fs.r0, fs.r1,
+                                               offs, cols, this._opacity(), op === 'lighter');
                     return;
                 }
                 __rpg2lx.bmpCanvasOp(canvas._nbmpRef, 0, this._rectPath(x, y, w, h), this._clips, this);
@@ -1348,6 +1368,49 @@ inline constexpr const char* kMvPostCorePatchJs = R"JS(
             this._renderer.render(stage);
         }
         this.frameCount++;
+    };
+
+    // Window back and frame pictures depend only on the windowskin, the size and (the back) the tone. Every scene
+    // builds its windows again, so each finished picture is kept per skin and copied instead of drawn again.
+    // A plugin that replaces these methods outright bypasses the cache; one that wraps them still gets it.
+    var __skinParts = typeof WeakMap === 'function' ? new WeakMap() : null;
+    function __copyBitmap(dst, src) {
+        __rpg2lx.bmpBlt(dst._canvas._nbmpRef, src._canvas._nbmpRef, 0, 0, src.width, src.height,
+                        0, 0, src.width, src.height, 255, 'copy');
+        dst._setDirty();
+    }
+    function __cachedSkinPart(win, sprite, key, w, h, draw) {
+        var skin = win._windowskin;
+        if (!__skinParts || !(w > 0 && h > 0) || !skin || !skin.isReady()) return draw.call(win);
+        var parts = __skinParts.get(skin);
+        if (!parts) { parts = new Map(); __skinParts.set(skin, parts); }
+        var hit = parts.get(key);
+        if (!hit) {
+            draw.call(win);
+            var made = sprite.bitmap;
+            if (!made || made.width !== w || made.height !== h) return;
+            hit = new Bitmap(w, h);
+            __copyBitmap(hit, made);
+            if (parts.size >= 24) parts.delete(parts.keys().next().value);
+            parts.set(key, hit);
+            return;
+        }
+        var bitmap = new Bitmap(w, h);
+        sprite.bitmap = bitmap;
+        sprite.setFrame(0, 0, w, h);
+        __copyBitmap(bitmap, hit);
+    }
+    var _Window_refreshBack = Window.prototype._refreshBack;
+    Window.prototype._refreshBack = function() {
+        var m = this._margin, w = this._width - m * 2, h = this._height - m * 2, t = this._colorTone;
+        __cachedSkinPart(this, this._windowBackSprite, 'b' + w + 'x' + h + ':' + t[0] + ',' + t[1] + ',' + t[2],
+                         w, h, _Window_refreshBack);
+        this._windowBackSprite.move(m, m);
+    };
+    var _Window_refreshFrame = Window.prototype._refreshFrame;
+    Window.prototype._refreshFrame = function() {
+        __cachedSkinPart(this, this._windowFrameSprite, 'f' + this._width + 'x' + this._height,
+                         this._width, this._height, _Window_refreshFrame);
     };
 
     // 5. Window cursor reuse optimization (zero bitmap churn when navigating menus!)

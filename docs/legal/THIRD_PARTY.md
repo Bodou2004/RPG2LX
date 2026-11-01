@@ -1,9 +1,18 @@
-# Dependencias del menú
+# Dependencias de terceros
 
-- SDL2 2.32.10: [release oficial](https://github.com/libsdl-org/SDL/releases/tag/release-2.32.10), licencia zlib. El SDK Windows descargado para desarrollo queda dentro de build/deps y no se versiona. Un paquete distribuido debe conservar la licencia de la biblioteca que incluya. No se incorporó código de RPG Maker al launcher.
-- font8x8, Daniel Hepper y colaboradores: [repositorio original](https://github.com/dhepper/font8x8). Los archivos font8x8_basic.h y font8x8_ext_latin.h declaran dominio público; se conservan sus cabeceras y README. Modificación local: arrays convertidos de char a static const unsigned char para C++17 y almacenamiento de solo lectura. Fuente disponible: ASCII y Latin-1.
+Todo lo que se compila dentro del binario o se distribuye en el paquete de la SD. `tools/package_sd.py` copia cada licencia a `rpg2lx/licenses/` y falla si falta alguna.
 
-No se eligió todavía una licencia general para RPG2LX ni se publicó un paquete. Las dependencias conservan sus términos propios.
+| Componente | Origen | Licencia | Uso en RPG2LX | En el paquete |
+|---|---|---|---|---|
+| QuickJS | `third_party/quickjs`, de Fabrice Bellard y Charlie Gordon | MIT | Motor JavaScript que ejecuta los corescripts y plugins. Modificación local marcada `RPG2LX` en `quickjs.c`: `RegExp.$1`–`$9` y el resto de estáticos antiguos de `RegExp`. | `QuickJS-LICENSE.txt` |
+| canvas_ity | `third_party/canvas_ity` | ISC | Rasterizador de Canvas 2D para trazados, curvas, degradados, patrones, transformaciones y recortes. | `canvas_ity-LICENSE.txt` |
+| stb_image 2.30 | `third_party/stb`, de [nothings/stb](https://github.com/nothings/stb) | MIT o dominio público, a elegir | Decodificación de PNG. No se usan sus funciones de apertura de archivos: RPG2LX lee con rutas de filesystem para soportar Unicode. | `stb-LICENSE.txt` |
+| stb_vorbis | `third_party/stb` | MIT o dominio público, a elegir | Decodificación de audio OGG. | `stb-LICENSE.txt` (misma licencia) |
+| stb_truetype | `third_party/stb` | MIT o dominio público, a elegir | Rasterizado de fuentes TrueType. | `stb-LICENSE.txt` (misma licencia) |
+| font8x8 | `third_party/font8x8`, de Daniel Hepper y colaboradores ([repositorio](https://github.com/dhepper/font8x8)) | Dominio público | Fuente de mapa de bits de respaldo (ASCII y Latin-1). Modificación local: los arrays pasan de `char` a `static const unsigned char`. | No hace falta |
+| SDL2 | Biblioteca del sistema en la consola; el SDK solo se usa para compilar | zlib | Ventana, renderizado, entrada y audio. Se enlaza dinámicamente y no se distribuye. | `SDL2-LICENSE.txt` |
+| libc++, libc++abi, libunwind (LLVM) | Toolchain Zig | Apache 2.0 con excepción LLVM | Biblioteca estándar de C++ enlazada estáticamente en el binario ARM64. | `LLVM-*-LICENSE.txt` |
+| Runtime de Zig | Toolchain Zig | MIT | Código de arranque enlazado por el compilador. | `Zig-LICENSE.txt` |
+| Corescript de RPG Maker MV | KADOKAWA CORPORATION / YOJI OJIMA | MIT | Tablas de autotiles y fórmulas de layout adaptadas de `Tilemap.js` para el renderizador nativo. Los corescripts completos los aporta cada juego. | `MV-CORESCRIPT-LICENSE.txt` |
 
-- Corescript oficial RPG Maker MV: tablas de autotiles y fórmulas de layout adaptadas de Tilemap.js, copyright (c) 2015 KADOKAWA CORPORATION./YOJI OJIMA, licencia MIT. Aviso completo en MV-CORESCRIPT-LICENSE.txt. El resto del repositorio no se incorporó al runtime.
-- stb_image.h de [nothings/stb](https://github.com/nothings/stb): decodificador compilado solo para PNG, licencia MIT o dominio público a elección, ambas incluidas al final del header original en third_party/stb. No se usan sus funciones de apertura de archivos; RPG2LX lee con paths de filesystem para soportar Unicode.
+RPG2LX en sí todavía no tiene una licencia general elegida. Hay que decidirla antes de publicarlo en PortMaster.

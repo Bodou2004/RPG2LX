@@ -33,7 +33,17 @@ const std::unordered_map<std::string,std::string>& listing(const fs::path& dir) 
 }
 }
 
+bool is_safe_relative(const std::string& rel) {
+    std::string norm=rel;
+    for(char& c:norm) if(c=='\\') c='/';
+    const fs::path p=fs::u8path(norm);
+    if(p.has_root_name() || p.has_root_directory()) return false;
+    for(const auto& part:p) if(part=="..") return false;
+    return true;
+}
+
 fs::path find_project_file(const fs::path& root, const std::string& rel) {
+    if(!is_safe_relative(rel)) return {};
     const fs::path exact=root/fs::u8path(rel);
     std::error_code ec;
     if(fs::exists(exact,ec))return exact;

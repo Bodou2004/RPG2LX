@@ -106,6 +106,21 @@ struct DecodedImage {
     int width = 0;
     int height = 0;
     std::vector<std::uint32_t> pixels;
+    // Decodes the file again. Once an image is on the GPU its CPU copy is dropped (most images are only ever drawn
+    // as sprites) and brought back by this the first time the game reads or copies its pixels.
+    std::function<bool(std::vector<std::uint32_t>&)> reload;
+    bool pixels_dropped = false;
+    bool cpu_used = false;  // read by the game before reaching the GPU: keep the CPU copy
+
+    const std::vector<std::uint32_t>& cpu_pixels() {
+        cpu_used = true;
+        if (pixels_dropped) {
+            pixels_dropped = false;
+            if (!reload || !reload(pixels)) pixels.assign(static_cast<std::size_t>(width) * height, 0u);
+            reload = nullptr;  // pixels the game reads are kept from now on
+        }
+        return pixels;
+    }
 #ifdef RPG2LX_WITH_SDL
     SDL_Texture* shared_tex = nullptr;
     ~DecodedImage() {
@@ -121,7 +136,7 @@ inline std::shared_ptr<DecodedImage> decode_project_image(const fs::path& projec
                                                           const std::string& raw_url,
                                                           const std::vector<std::uint8_t>& enc_key) {
     const std::string rel = url_decode_rel(raw_url);
-    if (rel.empty() || rel.find("..") != std::string::npos) return nullptr;
+    if (rel.empty() || !is_safe_relative(rel)) return nullptr;
 
     fs::path full = find_project_file(project_root, rel);
     std::error_code ec;
@@ -178,6 +193,12 @@ inline std::shared_ptr<DecodedImage> decode_project_image(const fs::path& projec
     img->pixels.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
     std::memcpy(img->pixels.data(), rgba, img->pixels.size() * sizeof(std::uint32_t));
     stbi_image_free(rgba);
+    img->reload = [project_root, raw_url, enc_key, w, h](std::vector<std::uint32_t>& out) {
+        const auto again = decode_project_image(project_root, raw_url, enc_key);
+        if (!again || again->width != w || again->height != h) return false;
+        out = std::move(again->pixels);
+        return true;
+    };
     return img;
 }
 
@@ -258,29 +279,39 @@ inline void composite_src_over(std::uint32_t& dst, std::uint32_t sr, std::uint32
     const std::uint32_t dg = (dst >> 8) & 0xFFu;
     const std::uint32_t db = (dst >> 16) & 0xFFu;
     const std::uint32_t inv_sa = 255u - sa;
-    const std::uint32_t out_a = sa + (da * inv_sa + 127u) / 255u;
-    if (out_a == 0) {
-        dst = 0;
+    // (x + 127) / 255 without a division: the handhelds' cores divide slowly and this runs per pixel.
+    const auto div255 = [](std::uint32_t x) { x += 127u; return (x + 1u + (x >> 8)) >> 8; };
+    if (da == 255u) {
+        dst = pack_px(div255(sr * sa + dr * inv_sa), div255(sg * sa + dg * inv_sa), div255(sb * sa + db * inv_sa), 255u);
         return;
     }
-    const std::uint32_t out_r = (sr * sa * 255u + dr * da * inv_sa + out_a * 127u) / (out_a * 255u);
-    const std::uint32_t out_g = (sg * sa * 255u + dg * da * inv_sa + out_a * 127u) / (out_a * 255u);
-    const std::uint32_t out_b = (sb * sa * 255u + db * da * inv_sa + out_a * 127u) / (out_a * 127u + out_a * 128u);
-    dst = pack_px(std::min(255u, out_r), std::min(255u, out_g), std::min(255u, out_b), std::min(255u, out_a));
+    const std::uint32_t out_a = sa + div255(da * inv_sa);
+    // One reciprocal instead of three divisions; the numerators stay below 2^24, exact in a float.
+    const float k = 1.0f / static_cast<float>(out_a * 255u);
+    const float dw = static_cast<float>(da * inv_sa), sw = static_cast<float>(sa * 255u), half = 0.5f;
+    const auto mix = [&](std::uint32_t s, std::uint32_t d) {
+        return std::min(255u, static_cast<std::uint32_t>((s * sw + d * dw) * k + half));
+    };
+    dst = pack_px(mix(sr, dr), mix(sg, dg), mix(sb, db), std::min(255u, out_a));
 }
 
 struct NativeBitmap {
     int width = 1;
     int height = 1;
     std::shared_ptr<DecodedImage> shared_img;
-    std::vector<std::uint32_t> own_pixels;
-    bool dirty = true;
+    // Mutable: content that only lives on the GPU is read back into it on the first CPU access, even a const one.
+    mutable std::vector<std::uint32_t> own_pixels;
+    mutable bool dirty = true;
     bool blank = true;
 
 #ifdef RPG2LX_WITH_SDL
     SDL_Texture* own_tex = nullptr;
     int tex_w = 0;
     int tex_h = 0;
+    // A render target holding the whole picture (a scene snapshot). Reading pixels back from the GPU stalls it, so
+    // that only happens if the game ever reads or draws on this bitmap; showing it costs nothing.
+    mutable SDL_Texture* gpu_tex = nullptr;
+    SDL_Renderer* gpu_renderer = nullptr;
 #endif
 
     NativeBitmap(int w, int h)
@@ -309,10 +340,73 @@ struct NativeBitmap {
             SDL_DestroyTexture(own_tex);
             own_tex = nullptr;
         }
+        drop_gpu_content();
 #endif
     }
 
+#ifdef RPG2LX_WITH_SDL
+    void drop_gpu_content() const {
+        if (gpu_tex) SDL_DestroyTexture(gpu_tex);
+        gpu_tex = nullptr;
+    }
+
+    // Takes ownership of `rt` (a width x height render target) as the bitmap's whole content.
+    void set_gpu_content(SDL_Renderer* renderer, SDL_Texture* rt) {
+        drop_gpu_content();
+        shared_img.reset();
+        own_pixels.clear();
+        own_pixels.shrink_to_fit();
+        gpu_tex = rt;
+        gpu_renderer = renderer;
+        blank = false;
+        dirty = false;
+    }
+
+    // Copies GPU-only content into own_pixels; afterwards the bitmap is an ordinary CPU one.
+    void materialize() const {
+        if (!gpu_tex) return;
+        own_pixels.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0u);
+        SDL_Texture* prev = SDL_GetRenderTarget(gpu_renderer);
+        if (SDL_SetRenderTarget(gpu_renderer, gpu_tex) == 0) {
+            SDL_RenderReadPixels(gpu_renderer, nullptr, SDL_PIXELFORMAT_ABGR8888, own_pixels.data(), width * 4);
+            SDL_SetRenderTarget(gpu_renderer, prev);
+        }
+        drop_gpu_content();
+        dirty = true;
+    }
+
+    // MV's snapshot blur done on the GPU: down to half size and back up with linear filtering.
+    bool blur_gpu() {
+        if (!gpu_tex || width < 4 || height < 4) return false;
+        const char* old_hint = SDL_GetHint(SDL_HINT_RENDER_SCALE_QUALITY);
+        const std::string restore = old_hint ? old_hint : "nearest";
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+        SDL_Texture* half = SDL_CreateTexture(gpu_renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_TARGET,
+                                              width / 2, height / 2);
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, restore.c_str());
+        if (!half) return false;
+        SDL_Texture* prev = SDL_GetRenderTarget(gpu_renderer);
+        bool ok = SDL_SetRenderTarget(gpu_renderer, half) == 0;
+        if (ok) {
+            SDL_SetTextureBlendMode(gpu_tex, SDL_BLENDMODE_NONE);
+            SDL_RenderCopy(gpu_renderer, gpu_tex, nullptr, nullptr);
+            ok = SDL_SetRenderTarget(gpu_renderer, gpu_tex) == 0;
+            if (ok) {
+                SDL_SetTextureBlendMode(half, SDL_BLENDMODE_NONE);
+                SDL_RenderCopy(gpu_renderer, half, nullptr, nullptr);
+            }
+            SDL_SetTextureBlendMode(gpu_tex, SDL_BLENDMODE_BLEND);
+        }
+        SDL_SetRenderTarget(gpu_renderer, prev);
+        SDL_DestroyTexture(half);
+        return ok;
+    }
+#endif
+
     bool is_blank() const {
+#ifdef RPG2LX_WITH_SDL
+        if (gpu_tex) return false;
+#endif
         if (blank && !shared_img) return true;
         if (width == 1 && height == 1) {
             return ((read_pixels()[0] >> 24) & 0xFFu) == 0;
@@ -321,12 +415,18 @@ struct NativeBitmap {
     }
 
     const std::uint32_t* read_pixels() const {
-        return shared_img ? shared_img->pixels.data() : own_pixels.data();
+#ifdef RPG2LX_WITH_SDL
+        materialize();
+#endif
+        return shared_img ? shared_img->cpu_pixels().data() : own_pixels.data();
     }
 
     std::uint32_t* write_pixels() {
+#ifdef RPG2LX_WITH_SDL
+        materialize();
+#endif
         if (shared_img) {
-            own_pixels = shared_img->pixels;
+            own_pixels = shared_img->cpu_pixels();
             shared_img.reset();
         }
         dirty = true;
@@ -337,6 +437,7 @@ struct NativeBitmap {
 #ifdef RPG2LX_WITH_SDL
     SDL_Texture* get_texture(SDL_Renderer* renderer) {
         if (!renderer || width <= 0 || height <= 0) return nullptr;
+        if (gpu_tex) return gpu_tex;
         if (shared_img) {
             if (!shared_img->shared_tex) {
                 shared_img->shared_tex = SDL_CreateTexture(
@@ -346,6 +447,11 @@ struct NativeBitmap {
                     SDL_SetTextureBlendMode(shared_img->shared_tex, SDL_BLENDMODE_BLEND);
                     SDL_UpdateTexture(shared_img->shared_tex, nullptr,
                                       shared_img->pixels.data(), shared_img->width * 4);
+                    if (shared_img->reload && !shared_img->cpu_used) {
+                        shared_img->pixels.clear();
+                        shared_img->pixels.shrink_to_fit();
+                        shared_img->pixels_dropped = true;
+                    }
                 }
             }
             return shared_img->shared_tex;
@@ -371,6 +477,13 @@ struct NativeBitmap {
     void resize(int nw, int nh) {
         nw = std::clamp(nw, 1, 8192);
         nh = std::clamp(nh, 1, 8192);
+#ifdef RPG2LX_WITH_SDL
+        if (gpu_tex) {
+            drop_gpu_content();  // resizing clears the picture anyway
+            own_pixels.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0u);
+            blank = true;
+        }
+#endif
         if (nw == width && nh == height && !shared_img) {
             if (!blank) {
                 std::fill(own_pixels.begin(), own_pixels.end(), 0u);
@@ -403,6 +516,42 @@ struct NativeBitmap {
             const std::size_t row_bytes = static_cast<std::size_t>(x1 - x0) * sizeof(std::uint32_t);
             for (int y = y0; y < y1; ++y) {
                 std::memset(dst + static_cast<std::size_t>(y) * width + x0, 0, row_bytes);
+            }
+        }
+    }
+
+    // fillRect with a concentric radial gradient (light plugins such as TerraxLighting draw these every frame).
+    // `lut` holds the gradient's 256 unpremultiplied colours from the inner to the outer circle; inside r0 and
+    // beyond r1 the end colours extend, as in canvas. `lighter` adds premultiplied colours; otherwise source-over.
+    void radial_fill_rect(int rx, int ry, int rw, int rh, double cx, double cy, double r0, double r1,
+                          const std::uint32_t lut[256], int paint_opacity, bool lighter) {
+        const int x0 = std::max(0, rx), y0 = std::max(0, ry);
+        const int x1 = std::min(width, rx + rw), y1 = std::min(height, ry + rh);
+        if (x0 >= x1 || y0 >= y1 || r1 <= r0 || paint_opacity <= 0) return;
+        const std::uint32_t op = static_cast<std::uint32_t>(std::min(paint_opacity, 255));
+        const float k = 255.0f / static_cast<float>(r1 - r0), fr0 = static_cast<float>(r0);
+        std::uint32_t* dst = write_pixels();
+        for (int y = y0; y < y1; ++y) {
+            std::uint32_t* row = dst + static_cast<std::size_t>(y) * width;
+            const float dy = static_cast<float>(y + 0.5 - cy);
+            for (int x = x0; x < x1; ++x) {
+                const float dx = static_cast<float>(x + 0.5 - cx);
+                const float t = (std::sqrt(dx * dx + dy * dy) - fr0) * k;
+                const std::uint32_t c = lut[t <= 0.0f ? 0 : t >= 255.0f ? 255 : static_cast<int>(t + 0.5f)];
+                std::uint32_t sa = c >> 24;
+                if (op != 255u) sa = (sa * op + 127u) / 255u;
+                if (!sa) continue;
+                const std::uint32_t sr = c & 0xFFu, sg = (c >> 8) & 0xFFu, sb = (c >> 16) & 0xFFu;
+                if (!lighter) {
+                    composite_src_over(row[x], sr, sg, sb, sa);
+                    continue;
+                }
+                const std::uint32_t p = row[x], da = p >> 24;
+                const std::uint32_t oa = std::min(255u, sa + da);
+                const auto add = [&](std::uint32_t s, std::uint32_t d) {
+                    return std::min(255u, (std::min(255u * 255u, s * sa + d * da) + oa / 2) / oa);
+                };
+                row[x] = pack_px(add(sr, p & 0xFFu), add(sg, (p >> 8) & 0xFFu), add(sb, (p >> 16) & 0xFFu), oa);
             }
         }
     }
@@ -637,17 +786,32 @@ struct NativeBitmap {
         const int y1 = std::min(height, dy + dh);
         if (x0 >= x1 || y0 >= y1) return;
 
+        // Source column of every destination column, computed once instead of a division per pixel.
+        thread_local std::vector<int> src_cols;
+        src_cols.resize(static_cast<std::size_t>(x1 - x0));
+        for (int x = x0; x < x1; ++x)
+            src_cols[static_cast<std::size_t>(x - x0)] = sx + std::clamp(((x - dx) * sw) / dw, 0, sw - 1);
+        const int* cols = src_cols.data();
+        const int cnt = x1 - x0;
+
         for (int y = y0; y < y1; ++y) {
             const int src_y = sy + std::clamp(((y - dy) * sh) / dh, 0, sh - 1);
             const std::uint32_t* srow = spx + static_cast<std::size_t>(src_y) * spitch;
-            std::uint32_t* drow = dpx + static_cast<std::size_t>(y) * width;
-            for (int x = x0; x < x1; ++x) {
-                const int src_x = sx + std::clamp(((x - dx) * sw) / dw, 0, sw - 1);
-                const std::uint32_t sp = srow[src_x];
-                const std::uint32_t sa = (((sp >> 24) & 0xFFu) * op + 127u) / 255u;
+            std::uint32_t* drow = dpx + static_cast<std::size_t>(y) * width + x0;
+            if (is_copy && op == 255u) {
+                for (int c = 0; c < cnt; ++c) {
+                    const std::uint32_t sp = srow[cols[c]];
+                    if (sp >> 24) drow[c] = sp;
+                }
+                continue;
+            }
+            for (int c = 0; c < cnt; ++c) {
+                const std::uint32_t sp = srow[cols[c]];
+                std::uint32_t sa = (sp >> 24) & 0xFFu;
+                if (op != 255u) sa = (sa * op + 127u) / 255u;
                 if (!sa) continue;
-                if (is_copy) drow[x] = (sp & 0x00FFFFFFu) | (sa << 24);
-                else composite_src_over(drow[x], sp & 0xFFu, (sp >> 8) & 0xFFu, (sp >> 16) & 0xFFu, sa);
+                if (is_copy) drow[c] = (sp & 0x00FFFFFFu) | (sa << 24);
+                else composite_src_over(drow[c], sp & 0xFFu, (sp >> 8) & 0xFFu, (sp >> 16) & 0xFFu, sa);
             }
         }
     }
@@ -705,6 +869,9 @@ struct NativeBitmap {
 
     void blur() {
         if (width < 2 || height < 2) return;
+#ifdef RPG2LX_WITH_SDL
+        if (blur_gpu()) return;
+#endif
         std::uint32_t* px = write_pixels();
         std::vector<std::uint32_t> tmp(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
 

@@ -8,7 +8,7 @@
   "items_opt": [],
   "attr": {
     "title": "RPG2LX - RPG Maker MV HUB",
-    "desc": "HUB for RPG Maker MV games with a native engine (QuickJS + SDL2) that runs the original corescripts and plugins unmodified, as an exported game, with full Canvas 2D, DOM and Node/NW.js API support. Per-game button mapping to MV actions or keys.",
+    "desc": "HUB for RPG Maker MV games with a native engine (QuickJS + SDL2) that runs the original corescripts and plugins unmodified, as an exported game. Includes a broad compatibility layer for Canvas 2D, the DOM and the Node/NW.js APIs that plugins commonly use (no video, PIXI filters, web workers or networking). Per-game button mapping to MV actions or keys.",
     "inst": "Copy each complete RPG Maker MV game (export or project folder) into its own folder inside ports/rpg2lx/games/. Saves (.rpgsave) and settings are kept outside game assets.",
     "genres": [
       "rpg"

@@ -47,6 +47,9 @@ int main(int argc, char** argv) {
     // RPG2LX_UPDATES=N runs N logic updates per drawn frame, as the launcher does to catch up on a slow device.
     const char* updates_env = std::getenv("RPG2LX_UPDATES");
     const int updates = updates_env ? std::max(1, std::atoi(updates_env)) : 1;
+    // RPG2LX_SLOW_MS=N prints every frame slower than N ms.
+    const char* slow_env = std::getenv("RPG2LX_SLOW_MS");
+    const double slow_log_ms = slow_env ? std::atof(slow_env) : 0.0;
     auto step = [&](int n) {
         for (int i = 0; i < n; ++i) {
             const auto t0 = std::chrono::steady_clock::now();
@@ -58,6 +61,7 @@ int main(int argc, char** argv) {
             total_ms += ms;
             worst_ms = std::max(worst_ms, ms);
             if (ms > 25.0) ++slow;
+            if (slow_log_ms > 0 && ms > slow_log_ms) std::cout << "  slow frame " << engine.frame_count() << ": " << ms << " ms\n";
             ++frames;
         }
         return true;

@@ -1,5 +1,7 @@
 # Compatibilidad MV — RPG2LX `0.5.0`
 
+> Esta matriz describe la versión `0.5.0`. Lo añadido o cambiado después (navegador y Node ampliados, `RegExp.$1`, rendimiento, seguridad de rutas) está en [STATUS.md](STATUS.md), que es la referencia actual.
+
 Actualizado 2026-10-30. Motor 1:1 de RPG Maker MV: ejecuta directamente los scripts oficiales sin modificar del proyecto (`rpg_core.js`, `rpg_managers.js`, `rpg_objects.js`, `rpg_scenes.js`, `rpg_sprites.js`, `rpg_windows.js` y `js/plugins/*.js`) sobre QuickJS con renderizado de escena acelerado por GPU en C++/SDL2 y audio polifónico `stb_vorbis`.
 
 | Área | Implementado (`0.5.0`) | Notas / Alcance |

@@ -385,11 +385,19 @@ inline constexpr const char* kMvBrowserCompatJs = R"JS(
         };
     });
     def('crypto', {
-        getRandomValues: function(arr) { for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 4294967296); return arr; },
+        // Bytes from the system's secure random source, as in a browser.
+        getRandomValues: function(arr) {
+            if (!arr || !ArrayBuffer.isView(arr)) throw new TypeError('getRandomValues needs an integer typed array');
+            var src = new Uint8Array(__rpg2lx.randomBytes(arr.byteLength));
+            new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength).set(src);
+            return arr;
+        },
         randomUUID: function() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16);
-            });
+            var b = new Uint8Array(__rpg2lx.randomBytes(16)), h = [];
+            b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+            for (var i = 0; i < 16; i++) h.push((b[i] < 16 ? '0' : '') + b[i].toString(16));
+            return h.slice(0, 4).join('') + '-' + h.slice(4, 6).join('') + '-' + h.slice(6, 8).join('') + '-' +
+                   h.slice(8, 10).join('') + '-' + h.slice(10).join('');
         }
     });
     def('queueMicrotask', function(fn) { Promise.resolve().then(fn); });
@@ -538,6 +546,11 @@ inline constexpr const char* kMvBrowserCompatJs = R"JS(
     PIXI.Program = { from: function() { return {}; } };
     PIXI.Geometry = function Geometry() {};
     PIXI.ObservablePoint = PIXI.Point;
+    // pixi.js v4 still exposes these v2/v3 names through its deprecation layer, and older plugins use them.
+    var oldNames = { DisplayObjectContainer: PIXI.Container, SpriteBatch: PIXI.Container, AbstractFilter: PIXI.Filter,
+                     TilingSprite: PIXI.extras && PIXI.extras.TilingSprite, MovieClip: PIXI.extras && PIXI.extras.AnimatedSprite,
+                     BitmapText: PIXI.extras && PIXI.extras.BitmapText, TransformManual: PIXI.TransformBase };
+    for (var on in oldNames) if (oldNames[on] && !PIXI[on]) PIXI[on] = oldNames[on];
     PIXI.DEG_TO_RAD = Math.PI / 180;
     PIXI.RAD_TO_DEG = 180 / Math.PI;
     PIXI.PI_2 = Math.PI * 2;
@@ -693,17 +706,46 @@ inline constexpr const char* kMvBrowserCompatJs = R"JS(
     }; }
     function enoent(p) { var e = new Error("ENOENT: no such file or directory, open '" + p + "'"); e.code = 'ENOENT'; e.errno = -2; e.path = p; return e; }
     var readFileSync = fsMod.readFileSync;
+    // Like Node: no encoding gives a Buffer, and writes accept an encoding (base64 decodes to bytes).
     fsMod.readFileSync = function(p, opts) {
         if (!fsMod.existsSync(p)) throw enoent(p);
-        var r = readFileSync(p, opts);
+        var enc = typeof opts === 'string' ? opts : (opts && opts.encoding);
+        var r = readFileSync(p, enc ? 'utf8' : null);
         if (r === null || r === undefined) throw enoent(p);
+        if (!enc) return global.Buffer ? global.Buffer.from(r) : r;
+        if (enc === 'base64' || enc === 'hex') {
+            var bytes = readFileSync(p, null);
+            return global.Buffer ? global.Buffer.from(bytes).toString(enc) : r;
+        }
         return r;
     };
-    fsMod.appendFileSync = function(p, data) {
-        var old = fsMod.existsSync(p) ? readFileSync(p, 'utf8') || '' : '';
-        fsMod.writeFileSync(p, old + String(data));
+    var writeFileSync = fsMod.writeFileSync;
+    fsMod.writeFileSync = function(p, data, opts) {
+        var enc = typeof opts === 'string' ? opts : (opts && opts.encoding);
+        if (typeof data === 'string' && enc === 'base64' && global.Buffer) data = global.Buffer.from(data, 'base64');
+        writeFileSync(p, data);
     };
-    fsMod.copyFileSync = function(a, b) { fsMod.writeFileSync(b, readFileSync(a, 'utf8')); };
+    function toBytes(d) {
+        if (d instanceof ArrayBuffer) return new Uint8Array(d);
+        if (d && ArrayBuffer.isView(d)) return new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+        return new TextEncoder().encode(String(d));
+    }
+    fsMod.appendFileSync = function(p, data) {
+        if (typeof data === 'string') {
+            var old = fsMod.existsSync(p) ? readFileSync(p, 'utf8') || '' : '';
+            return fsMod.writeFileSync(p, old + data);
+        }
+        var prev = fsMod.existsSync(p) ? readFileSync(p, null) : null, add = toBytes(data);
+        var out = new Uint8Array((prev ? prev.length : 0) + add.length);
+        if (prev) out.set(prev, 0);
+        out.set(add, prev ? prev.length : 0);
+        fsMod.writeFileSync(p, out);
+    };
+    fsMod.copyFileSync = function(a, b) {
+        var bytes = readFileSync(a, null);
+        if (bytes === null || bytes === undefined) throw enoent(a);
+        fsMod.writeFileSync(b, bytes);
+    };
     fsMod.renameSync = function(a, b) { fsMod.copyFileSync(a, b); fsMod.unlinkSync(a); };
     fsMod.rmSync = fsMod.rmdirSync = function(p) { fsMod.unlinkSync(p); };
     fsMod.accessSync = function(p) { if (!fsMod.existsSync(p)) throw enoent(p); };
@@ -780,9 +822,11 @@ inline constexpr const char* kMvBrowserCompatJs = R"JS(
         if (typeof data === 'string') {
             if (encoding === 'base64') { var s = atob(data); bytes = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i); }
             else bytes = new TextEncoder().encode(data);
-        } else bytes = new Uint8Array(data.buffer ? data.buffer : data);
+        } else if (data && ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+        else bytes = new Uint8Array(data instanceof ArrayBuffer ? data.slice(0) : (data || []));
         bytes.toString = function(enc) {
             if (enc === 'base64') { var t = ''; for (var i = 0; i < this.length; i++) t += String.fromCharCode(this[i]); return btoa(t); }
+            if (enc === 'hex') { var h = ''; for (var j = 0; j < this.length; j++) h += (this[j] < 16 ? '0' : '') + this[j].toString(16); return h; }
             return new TextDecoder().decode(this);
         };
         return bytes;
@@ -806,9 +850,23 @@ inline constexpr const char* kMvBrowserCompatJs = R"JS(
         assert: function(v, m) { if (!v) throw new Error(m || 'Assertion failed'); },
         timers: { setTimeout: setTimeout, clearTimeout: clearTimeout, setInterval: setInterval, clearInterval: clearInterval, setImmediate: global.setImmediate }
     };
+    // Steam's greenworks needs a native .node library that cannot run here: games get a Steam that is not running.
+    var greenworks = { initAPI: function() { return false; }, init: function() { return false; },
+        isSteamRunning: function() { return false; }, getCurrentGameLanguage: function() { return 'english'; },
+        getCurrentUILanguage: function() { return 'english'; }, getSteamId: function() { return { screenName: 'Player', steamId: '0', isValid: function() { return false; } }; },
+        getNumberOfAchievements: function() { return 0; }, getAchievementNames: function() { return []; },
+        isCloudEnabled: function() { return false; }, isCloudEnabledForUser: function() { return false; },
+        isGameOverlayEnabled: function() { return false; }, on: function() {}, once: function() {}, removeAllListeners: function() {} };
+    greenworks = typeof Proxy === 'function' ? new Proxy(greenworks, { get: function(t, k) {
+        if (k in t) return t[k];
+        // Anything else fails the way an offline Steam does: the error callback, if any, is called.
+        return function() { for (var i = arguments.length - 1; i >= 0; i--) if (typeof arguments[i] === 'function') {
+            var cb = arguments[i]; __queueAsync(function() { cb(new Error('Steam is not available')); }); break; } return false; };
+    } }) : greenworks;
     global.require = function(name) {
         name = String(name).replace(/^node:/, '');
         if (Object.prototype.hasOwnProperty.call(modules, name)) return modules[name];
+        if (/greenworks(\.js)?$/i.test(name)) return greenworks;
         var e = new Error("Cannot find module '" + name + "'");
         e.code = 'MODULE_NOT_FOUND';
         throw e;

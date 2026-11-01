@@ -614,9 +614,11 @@ int run_launcher(GameLibrary& library, int smoke_frames, const std::string& scre
             if (has_vsync && !vsync_on && set_render_vsync(renderer.get(), true)) vsync_on = true;
         }
 
-        // VSync already paces the frame. Without it, sleep instead of spinning: a busy-wait
-        // keeps a core at 100% on the handheld, steals time from the JS thread and heats the SoC.
-        if (smoke_frames == 0 && !vsync_on) {
+        // Caps the loop at 60 FPS by sleeping (a busy-wait keeps a core at 100% on the handheld, steals time from
+        // the JS thread and heats the SoC). Also with vsync on: some handheld compositors (sway on ROCKNIX) return
+        // from present early, and the game ran at 80 FPS, a third too fast. With a real 60 Hz vsync the frame has
+        // already taken its 16.7 ms and nothing sleeps.
+        if (smoke_frames == 0) {
             const double elapsed_ms = (static_cast<double>(SDL_GetPerformanceCounter() - frame_start_pc) * 1000.0) / perf_freq;
             if (elapsed_ms + 1.0 < kTargetFrameMs) SDL_Delay(static_cast<Uint32>(kTargetFrameMs - elapsed_ms));
         }
